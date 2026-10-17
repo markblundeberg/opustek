@@ -1,5 +1,5 @@
 """Is our melody someone else's? Transcribe a 16th-note line from a finished mix and search it for ours, at every
-alignment and transposition, against what random lines score by the same search.
+alignment and transposition, against what random lines with the same rhythm score by the same search.
 
 On a fixed-tempo grid (phase from the kick), each 16th step gets an onset strength (energy rise in 200-2500 Hz) and a
 pitch (harmonic summation over MIDI 45-84 on a 70 ms window just after the step). Validated on our own track, whose
@@ -101,9 +101,16 @@ def best_match(rows, pat):
     return best
 
 
-def chance(rows, n=300, seed=0):
+def chance(rows, n=300, seed=0, like=None):
+    """What random lines score by the same search. With `like` (your line), each random line keeps its rhythm: the
+    same note boundaries (a run of one pitch is one note), a random pitch per note. Use that: against free random
+    lines a held or repeated note looks alarming (a bar of one held D scored 12/16 against a 95th percentile of 7)
+    though any held note matches as well. Found by the second cold-test agent."""
     rng = np.random.default_rng(seed)
-    return [best_match(rows, list(rng.integers(0, 12, 16)))[0] for _ in range(n)]
+    if like is None:
+        return [best_match(rows, list(rng.integers(0, 12, 16)))[0] for _ in range(n)]
+    runs = np.r_[0, np.cumsum(np.diff(like) != 0)]
+    return [best_match(rows, list(rng.integers(0, 12, runs[-1] + 1)[runs]))[0] for _ in range(n)]
 
 
 def note(s):
@@ -133,10 +140,17 @@ def selftest():
     rows = bars(tr)
     own = best_match(rows, [x % 12 for x in P.DOOT_A])[0]
     ch = chance(rows, 100)
-    ok = pc >= 0.8 * len(score) and abs(err) < 15 and own >= 12 and own > np.percentile(ch, 95) + 3
+    chr_ = chance(rows, 100, like=[x % 12 for x in P.DOOT_A])
+    held = [2] * 16
+    sh, chh = best_match(rows, held)[0], chance(rows, 100, like=held)
+    ok = (pc >= 0.8 * len(score) and abs(err) < 15 and own >= 12 and own > np.percentile(chr_, 95) + 3
+          and sh <= np.percentile(chh, 95))
     print(f'  {len(score)} scored notes: onsets found {hit}, pitch class right {pc} ({100 * pc / len(score):.0f}%, >= 80%)')
     print(f'  kick phase {err:+.1f} ms from the true downbeat (|err| < 15; it reads late by about 10 ms, the low band rising after the click)')
-    print(f'  our own line found in our own intro: {own}/16 (>= 12); random lines {np.median(ch):.0f}, 95th pct {np.percentile(ch, 95):.0f}')
+    print(f'  our own line found in our own intro: {own}/16 (>= 12); random lines {np.median(ch):.0f}, 95th pct {np.percentile(ch, 95):.0f}; '
+          f'with its rhythm {np.median(chr_):.0f}, 95th pct {np.percentile(chr_, 95):.0f}')
+    print(f'  a held note: {sh}/16; free random lines\' 95th pct {np.percentile(ch, 95):.0f}, held random notes\' '
+          f'{np.percentile(chh, 95):.0f} (a held note must sit at chance against its own rhythm)')
     print('  ->', 'the transcription finds a known line, and only it' if ok else 'the transcription is blind here')
     return ok
 
@@ -161,6 +175,6 @@ if __name__ == '__main__':
             pat = [note(s) % 12 for s in line.split(',')]
             assert len(pat) == 16, 'a line is 16 steps'
             same, shift, tr_ = best_match(rows, pat)
-            print(f'ours ({" ".join(NAMES[p] for p in pat)}): best match {same}/16 steps (rotate {shift}, transpose {tr_})')
-        ch = chance(rows)
-        print(f'a random 16-note line scores {np.median(ch):.0f}/16 by the same search (95th pct {np.percentile(ch, 95):.0f})')
+            ch = chance(rows, like=pat)
+            print(f'ours ({" ".join(NAMES[p] for p in pat)}): best match {same}/16 steps (rotate {shift}, transpose {tr_}); '
+                  f'random lines with its rhythm score {np.median(ch):.0f}/16 (95th pct {np.percentile(ch, 95):.0f})')

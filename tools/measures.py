@@ -8,7 +8,7 @@ As a library (the tracks' check suites import it):
 
     from measures import load, db, Grid, band_share, phone_share, kick_punch, loudest_second, repetition, bed_fill,
                          sixteenth_levels, period_of, pitch_sim, side_ratio, crest, ending_steps, loudness,
-                         onsets, masking, kick_onset_contrast, master_cost, find_grid, syncopation   (and Grid.ts for swung 16ths)
+                         onsets, masking, kick_onset_contrast, master_cost, find_grid, syncopation, swing_of   (and Grid.ts for swung 16ths)
 
     load(path) -> (sr, x) with x shaped (channels, n); the kernel's dsp.lufs and dsp.true_peak_db want (n, 2), so use
     loudness(x, sr), or pass x.T. loudest_second -> (dBFS, time); repetition -> (next bar, 4 bars later);
@@ -131,8 +131,11 @@ def kick_punch(y, sr, kicks, lo=50, hi=160, after=0.03, between=0.5):
     power halfway to that kick's next kick, dB (each kick's own gap, so uneven patterns work; with kicks close
     together, as in 2-step, halfway can still sit in the previous kick's tail: use kick_onset_contrast there). When
     the bass fills the gaps the kick gets 'swallowed'; the duck may have recovered long before halfway, so look at the
-    bass's own level first. The other common cause is the master: a loud loudness target makes the limiter clamp the
-    kick's first 100 ms (see master_cost). Lowering the kick then makes it worse."""
+    bass's own level first. The kick's own tail is the next suspect: one was only 17 dB down halfway to the next
+    kick, 7 dB above the bass, and shortening it (a tenth of its level by 200 ms, gone by 0.32 s) took the master
+    from +10.5 to +15.8 dB where clipping the drum bus and a quieter master had done almost nothing. Measure the kick
+    stem alone at halfway first. The other common cause is the master: a loud loudness target makes the limiter clamp
+    the kick's first 100 ms (see master_cost). Lowering the kick then makes it worse."""
     e = _bandpass(mono(y), sr, lo, hi) ** 2
     ks = np.asarray(sorted(kicks))
     if len(ks) < 3:
@@ -207,6 +210,40 @@ def syncopation(hits):
             score += max(0, w[i + 1:j].max() - w[i])
     beats = max(1, len(h) / 4)
     return score / beats, len(idx) / beats
+
+
+def swing_of(y, sr, bpm, t0=0.0, t1=None, lo=2500, hi=12000):
+    """Where the off 16ths land: the onsets in [lo, hi] (hats, shakers) folded on one beat, and the peaks nearest the
+    'e' and the 'a' found relative to the on-beat peak, as a fraction of their 8th, the same number Grid.ts takes:
+    0.5 straight, about 0.6 for garage. -> (swing, strength), strength the share of the fold's onsets in those two
+    peaks (below about 0.1 there are too few off 16ths to judge). Needs the tempo only, not the phase. On our tracks
+    it read within 0.04 of what was written (a 2-step piece written at 0.6 read 0.605, a downtempo one at 0.58
+    read 0.57, straight ones 0.46-0.52)."""
+    y = mono(y)
+    t1 = len(y) / sr if t1 is None else t1
+    fps = 1000
+    seg = y[int(t0 * sr):int(t1 * sr)]
+    nbin = 200
+
+    def folded(lo_, hi_):
+        on = _onset_env(seg, sr, lo_, hi_, fps)
+        h_ = np.bincount(((np.arange(len(on)) / fps * bpm / 60) % 1 * nbin).astype(int), on, nbin)
+        return h_, np.convolve(np.r_[h_[-3:], h_, h_[:3]], np.ones(7) / 7, 'valid')
+
+    h, hs = folded(lo, hi)
+    # the beat from the kick band: off 16ths can be the loudest hats, but a kick lands on a beat or an 'and', and the
+    # answer is the same from either
+    # (the kick only picks which hat peak is the beat: their envelopes lag differently, by a few ms)
+    bk = int(folded(40, 160)[1].argmax())
+    near = [(bk + i) % nbin for i in range(-nbin // 16, nbin // 16 + 1)]
+    b0 = max(near, key=lambda i: hs[i])
+    rel = lambda i: ((i - b0) % nbin) / nbin
+    e_lo, e_hi = int(0.17 * nbin), int(0.37 * nbin)             # an 'e' anywhere from swing 0.34 to 0.74
+    pe = (b0 + e_lo + np.argmax([hs[(b0 + i) % nbin] for i in range(e_lo, e_hi)])) % nbin
+    pa = (b0 + nbin // 2 + e_lo + np.argmax([hs[(b0 + nbin // 2 + i) % nbin] for i in range(e_lo, e_hi)])) % nbin
+    sw = (rel(pe) + rel(pa) - 0.5) / 2 * 2                      # each as a fraction of its 8th, averaged
+    strength = (hs[pe] + hs[pa]) * 7 / max(h.sum(), 1e-12)
+    return float(sw), float(strength)
 
 
 def masking(part, other, sr, lo, hi, t0, t1):
@@ -330,13 +367,15 @@ def loudness(x, sr):
 
 
 def find_kicks(y, sr, grid, b0, b1):
-    """Kick times on the grid's beats from bar b0 to b1 where the 40-120 Hz band rises sharply."""
+    """Kick times on the grid's beats from bar b0 to b1 where the 40-120 Hz band rises sharply (not in the first 30 ms)."""
     e = _bandpass(mono(y), sr, 40, 120) ** 2
     out = []
     for b in range(b0, b1 + 1):
         for q in range(4):
             t = grid.tb(b, q)
-            pre = e[max(0, int((t - 0.03) * sr)):int(t * sr)].mean()
+            if t < 0.03:                         # nothing before it to compare with
+                continue
+            pre = e[int((t - 0.03) * sr):int(t * sr)].mean()
             post = e[int(t * sr):int((t + 0.03) * sr)].mean()
             if post > 4 * pre and post > 1e-7:
                 out.append(t)
@@ -564,6 +603,17 @@ def selftest():
     clipped = np.clip(kk * 6, -0.5, 0.5)
     mc, m0 = master_cost(kk, clipped, sr, beats), master_cost(kk, kk, sr, beats)
     report('master_cost', mc > 2 and abs(m0) < 1e-6, f'a hard limiter costs {mc:+.1f} dB of punch; no master {m0:+.1f}')
+    # swing_of: 16th hats swung at 0.62 read 0.62, straight ones 0.5 (within 0.03); our tracks read within 0.04
+    def hats(swing_):
+        z = np.zeros(n)
+        uh = np.arange(int(0.03 * sr))
+        for k in range(15 * 16):
+            i = int(g.ts(1, k, swing_) * sr)
+            z[i:i + len(uh)] += rng.standard_normal(len(uh)) * np.exp(-uh / (0.008 * sr)) * (0.3 if k % 2 else 0.2)
+        return z
+    w62, s62 = swing_of(hats(0.62) + kk, sr, 124)
+    w50, _ = swing_of(hats(0.5) + kk, sr, 124)
+    report('swing_of', abs(w62 - 0.62) < 0.03 and abs(w50 - 0.5) < 0.03, f'hats swung at 0.62 read {w62:.3f}, straight {w50:.3f} (strength {s62:.2f})')
     # syncopation: four on the floor and rolling 16ths score 0; pushes onto the 'a' score 2 per beat; noise's few
     # onsets score little
     four = np.arange(64) % 4 == 0

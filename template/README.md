@@ -25,6 +25,8 @@ those for yours. Two cold agents did this, one making house and one downtempo, i
 One diagnostic saves rounds: **compare kick punch on the sum of your stems with kick punch on the mastered mix.** If
 the master costs more than about 2 dB, beat-aligned peaks (kick, clap, lead attacks together) are feeding the
 limiter: saturate the clap, soft-clip the drum bus, or master a dB or two quieter. Lowering the kick makes it worse.
+If punch is low on the sum of the stems too, measure the kick stem alone halfway to the next kick before blaming the
+bass: a long kick tail fills its own gaps (one agent's sat 17 dB down there; shortening it gained 5 dB).
 
 The kernel has no plain sine or FM oscillator; numpy does those well (`np.sin(2 * np.pi * np.cumsum(f) / SR)` for a
 gliding sine). `dsp.ladder(..., drive=0)` is a linear ladder.
