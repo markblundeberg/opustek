@@ -354,7 +354,7 @@ def draw_roll(ctx, t, alpha):
 
 def draw_brief(ctx, t):
     a1 = shown(t, 0.6, tb(5) - 0.3)
-    text(ctx, 'Someone asked a fresh Claude agent:', W / 2, 330, 40, DIM, a1, align='center')
+    text(ctx, 'Someone asked a new Claude agent:', W / 2, 330, 40, DIM, a1, align='center')
     a2 = shown(t, 1.6, tb(5) - 0.3)
     text(ctx, '“make me some music, about a minute long.”', W / 2, 420, 58, INK, a2, slant=cairo.FONT_SLANT_ITALIC, align='center')
     a3 = shown(t, tb(3), tb(5) - 0.3)
@@ -431,9 +431,10 @@ def draw_title(ctx, t):
     a = ramp(t, tb(21) + 0.3, tb(21) + 1.6) * min(1.0, max(0.0, (DUR - 0.3 - t) / 1.5))
     text(ctx, 'Lantern', W / 2, 470, 120, INK, a, align='center')
     a2 = a * ramp(t, tb(21) + 1.2, tb(21) + 2.2)
-    text(ctx, 'made by a fresh Claude agent, on its first try, every sound built from scratch', W / 2, 570, 34, DIM, a2, align='center')
+    text(ctx, 'made by a new Claude agent with no memory of our other tracks,', W / 2, 570, 34, DIM, a2, align='center')
+    text(ctx, 'on its first try, every sound built from scratch', W / 2, 618, 34, DIM, a2, align='center')
     a3 = a * ramp(t, tb(21) + 2.2, tb(21) + 3.2)
-    text(ctx, 'the toolkit: github.com/markblundeberg/opustek', W / 2, 650, 34, COL['kalimba'], a3, align='center')
+    text(ctx, 'the toolkit: github.com/markblundeberg/opustek', W / 2, 700, 34, COL['kalimba'], a3, align='center')
 
 
 def frame(t):
