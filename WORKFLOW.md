@@ -138,6 +138,8 @@ These are your ears, with their calibrations. Each was built to answer one of th
 - **Watch your thresholds.** A fade-in designed at 6 dB per bar failed a check with its threshold at exactly 6. A "machines play less" check counted fade tails once both machines got 3 dB louder.
 - **Detrend.** A fade-in correlates with itself at every lag; our "the arpeggio is in 7" check had been reading a fade, not the 7, for four versions.
 - **RMS lies about sparse sounds.** A scrape that sounds clearly can read 35 dB down over a bar.
+- **Moving resonances bend a tuning check.** A formant filter gliding through a note's fundamental (a vowel diphthong) turns its phase by half a cycle, and an FFT tuning check reads a 20–25 cent dip on that note that isn't there. Leave gliding notes out of the tuning check, or measure the source before the filter. (Found by a cold-test agent singing vowels.)
+- **Kick spacing isn't always even.** In 2-step the kicks fall on steps 0, 7 and 10, and "halfway to the next kick" lands in the last kick's tail. Compare each kick's onset with the moment before it instead (`kick_onset_contrast`).
 - **A check that passes the version they complained about is blind.** Recalibrate it on that version.
 
 ---

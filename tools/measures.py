@@ -8,7 +8,7 @@ As a library (the tracks' check suites import it):
 
     from measures import load, db, Grid, band_share, phone_share, kick_punch, loudest_second, repetition, bed_fill,
                          sixteenth_levels, period_of, pitch_sim, side_ratio, crest, ending_steps, loudness,
-                         onsets, masking
+                         onsets, masking, kick_onset_contrast, master_cost   (and Grid.ts for swung 16ths)
 
     load(path) -> (sr, x) with x shaped (channels, n); the kernel's dsp.lufs and dsp.true_peak_db want (n, 2), so use
     loudness(x, sr), or pass x.T. loudest_second -> (dBFS, time); repetition -> (next bar, 4 bars later);
@@ -69,6 +69,14 @@ class Grid:
     def tb(self, bar, beat=0.0):
         return self.bar1 + (bar - 1) * self.bar + beat * self.beat
 
+    def ts(self, bar, step, swing=0.5):
+        """The time of 16th step `step` (0-15, or beyond into later bars) of bar `bar`, with swing: each odd 16th lands
+        at `swing` of its 8th (0.5 is straight; garage and lo-fi sit near 0.58-0.62). Pass swing explicitly where you
+        call it: a default bound to a module constant is fixed when the function is defined, which once made a
+        'straight' fault do nothing."""
+        pair, odd = divmod(step, 2)
+        return self.tb(bar) + pair * self.beat / 2 + odd * swing * self.beat / 2
+
 
 def _bandpass(y, sr, lo, hi, order=4):
     return signal.sosfilt(signal.butter(order, [lo, hi], 'band', fs=sr, output='sos'), y)
@@ -118,31 +126,53 @@ def loudest_second(y, sr, lo=2500, hi=4000, win=1.0, hop=0.5):
 
 def kick_punch(y, sr, kicks, lo=50, hi=160, after=0.03, between=0.5):
     """How far the kick stands out of the low end: mean power in [lo, hi] in the 30 ms after each kick against the
-    power halfway to the next beat, dB. When the bass fills the gaps the kick gets 'swallowed'; the duck may have
-    recovered long before halfway, so look at the bass's own level first. The other common cause is the master: a
-    loud loudness target makes the limiter clamp the kick's first 100 ms. Measure with the limiter bypassed too; if
-    the number jumps (one piece read +9.1 limited, +13.2 bypassed), the loudness target is your lever, and lowering
-    the kick makes it worse."""
+    power halfway to that kick's next kick, dB (each kick's own gap, so uneven patterns work; with kicks close
+    together, as in 2-step, halfway can still sit in the previous kick's tail: use kick_onset_contrast there). When
+    the bass fills the gaps the kick gets 'swallowed'; the duck may have recovered long before halfway, so look at the
+    bass's own level first. The other common cause is the master: a loud loudness target makes the limiter clamp the
+    kick's first 100 ms (see master_cost). Lowering the kick then makes it worse."""
     e = _bandpass(mono(y), sr, lo, hi) ** 2
-    ks = np.asarray(kicks)
+    ks = np.asarray(sorted(kicks))
     if len(ks) < 3:
         return float('nan')
-    gap = np.median(np.diff(ks))
-    on = [e[int(k * sr):int((k + after) * sr)].mean() for k in ks[:-1]]
-    off = [e[int((k + between * gap - after / 2) * sr):int((k + between * gap + after / 2) * sr)].mean() for k in ks[:-1]]
+    on, off = [], []
+    for k, nxt in zip(ks[:-1], ks[1:]):
+        m = k + between * (nxt - k)
+        on.append(e[int(k * sr):int((k + after) * sr)].mean())
+        off.append(e[int((m - after / 2) * sr):int((m + after / 2) * sr)].mean())
     return float(db(np.mean(on)) - db(np.mean(off)))
 
 
-def onsets(stem, sr, grid, b0, b1, rise_db=6.0, floor_db=-50.0, win=0.03):
+def kick_onset_contrast(y, sr, kicks, lo=40, hi=160):
+    """The kick's first 40 ms against the 40 ms just before it, dB, in [lo, hi]. Needs no gap length, so it suits any
+    pattern (2-step's kicks on steps 0, 7 and 10 read +1 dB on kick_punch where, by stem, the kick stood 6.7 dB over
+    the sub). It reads onset contrast, not how much the gaps fill: a busy sub just before each kick lowers it, as it
+    should. (From the first cold-test agent outside our setup, which wrote it for its garage track, Night Bus.)"""
+    e = _bandpass(mono(y), sr, lo, hi) ** 2
+    on = np.mean([e[int(k * sr):int((k + 0.04) * sr)].mean() for k in kicks])
+    pre = np.mean([e[max(0, int((k - 0.045) * sr)):max(1, int((k - 0.005) * sr))].mean() for k in kicks])
+    return float(db(on) - db(pre))
+
+
+def master_cost(premix, master, sr, kicks, measure=None):
+    """How much punch the master takes away: the punch measure on the sum of the stems minus the same on the mastered
+    mix, dB. More than about 2 dB means beat-aligned peaks are feeding the limiter: saturate the clap, soft-clip the
+    drum bus, or master a dB or two quieter. (One piece: +8.3 premix, +5.8 mastered at -11 LUFS, +4.1 at -10.)"""
+    measure = measure or kick_punch
+    return float(measure(premix, sr, kicks) - measure(master, sr, kicks))
+
+
+def onsets(stem, sr, grid, b0, b1, rise_db=6.0, floor_db=-50.0, win=0.03, swing=0.5):
     """Which 16th steps of a stem have a note starting, from bar b0 up to b1 (exclusive): a step counts when any
     octave band (125 Hz-8 kHz) rises by rise_db from the 30 ms before it to the 30 ms after, above floor_db re the
     stem's loudest step. Octave bands, because a broadband level misses a high note right after a low one still
     ringing. Returns a boolean array, one per step. Count them per bar and compare with the score's intent, not with
-    the render's own note list (that check would pass a missing part)."""
+    the render's own note list (that check would pass a missing part). Pass the piece's swing, or swung odd steps
+    are looked for in the wrong place."""
     y = mono(stem)
     bands = [(125 * 2 ** k, 250 * 2 ** k) for k in range(6)]
     E = [_bandpass(y, sr, lo, hi) ** 2 for lo, hi in bands]
-    steps = [grid.tb(b0) + k * grid.six for k in range((b1 - b0) * 16)]
+    steps = [grid.ts(b0, k, swing) for k in range((b1 - b0) * 16)]
     w = int(win * sr)
     post = np.array([[e[int(t * sr):int(t * sr) + w].mean() for e in E] for t in steps])
     pre = np.array([[e[max(0, int(t * sr) - w):int(t * sr)].mean() if int(t * sr) > 0 else 1e-20 for e in E] for t in steps])
@@ -405,6 +435,25 @@ def selftest():
     a_ = rng.standard_normal(n)
     m1, m0 = masking(a_, a_ * 10 ** (-10 / 20), sr, 600, 1400, 0, 10), masking(a_, rng.standard_normal(n), sr, 600, 1400, 0, 10)
     report('masking', abs(m1 - 10) < 0.2 and abs(m0) < 0.5, f'10 dB over: {m1:+.1f}; equal noise: {m0:+.1f}')
+    # swing: Grid.ts places odd 16ths late; onsets on swung plucks need the swing passed in
+    tsw = g.ts(1, 1, 0.6) - g.ts(1, 0, 0.6)
+    report('Grid.ts', abs(tsw - 0.6 * g.beat / 2) < 1e-9 and abs(g.ts(1, 1) - g.ts(1, 0) - g.six) < 1e-9, f'a swung odd 16th lands {tsw * 1000:.0f} ms after its 8th (straight {g.six * 1000:.0f})')
+    sw = np.zeros(n)
+    for k in range(4 * 16):
+        i = int(g.ts(1, k, 0.62) * sr)
+        sw[i:i + len(u)] += np.sign(np.sin(2 * np.pi * 440 * u)) * np.exp(-u / 0.06) * 0.3
+    got_sw, got_st = onsets(sw, sr, g, 1, 5, swing=0.62), onsets(sw, sr, g, 1, 5)
+    report('onsets, swung', got_sw.all() and got_st.mean() < 0.8, f'with the swing passed {got_sw.mean():.0%} of steps found; on the straight grid {got_st.mean():.0%}')
+    # 2-step: kicks on steps 0, 7 and 10 (swung); onset contrast reads the kick alone high and drops under a held sub
+    tk = [g.ts(b, st, 0.6) for b in range(1, 13) for st in (0, 7, 10)]
+    k2 = kick(tk)
+    sub = 0.4 * np.sin(2 * np.pi * 44 * t)
+    c0, c1 = kick_onset_contrast(k2, sr, tk), kick_onset_contrast(k2 + sub, sr, tk)
+    report('kick_onset_contrast', c0 > 10 and c1 < c0 - 6, f'2-step kicks alone {c0:+.1f} dB; under a held sub {c1:+.1f} dB')
+    # master cost: a hard clip on the kicks loses punch; no master loses none
+    clipped = np.clip(kk * 6, -0.5, 0.5)
+    mc, m0 = master_cost(kk, clipped, sr, beats), master_cost(kk, kk, sr, beats)
+    report('master_cost', mc > 2 and abs(m0) < 1e-6, f'a hard limiter costs {mc:+.1f} dB of punch; no master {m0:+.1f}')
     print('  ->', 'every measure tells its cases apart' if ok else 'a measure is blind')
     return ok
 
