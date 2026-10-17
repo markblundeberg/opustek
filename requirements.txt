@@ -1,0 +1,6 @@
+# The tracks, their checks and the films. Tested with Python 3.12, gcc 13, ffmpeg 6.1 on Linux.
+# With exactly these versions the tracks reproduce the released audio bit for bit; others will be within float rounding.
+numpy==1.26.4
+scipy==1.11.4
+pycairo==1.25.1
+Pillow==10.2.0

@@ -1,0 +1,12 @@
+# For tools/refscope (taking a finished mix apart) and its separation model. A separate environment is easiest:
+#   python3 -m venv .venv-analysis && .venv-analysis/bin/pip install -r tools/requirements-analysis.txt
+# CPU builds of torch are fine. Tested versions:
+numpy==2.5.4
+scipy==1.18.1
+torch==2.8.0
+torchaudio==2.8.0
+librosa==1.0.0
+soundfile==0.14.0
+soxr==1.1.0
+scikit-learn==1.9.1
+matplotlib==3.11.2

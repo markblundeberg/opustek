@@ -1,0 +1,13 @@
+out/
+ref/
+*.so
+__pycache__/
+*.wav
+*.flac
+*.mp3
+*.mp4
+*.webm
+*.ogg
+*.npz
+.venv*/
+tools/forbidden.local.txt
