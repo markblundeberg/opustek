@@ -22,8 +22,8 @@ As a tool, a coarse profile of any finished mix, yours or a reference you own, t
 --bar1 is the time of the first downbeat in seconds (tools/refscope's analysis finds it, or read it off a spectrogram). The
 profile prints numbers only; keep any reference audio, and anything you extract from it, out of version control.
 
-Coarse ranges we measured on two commercial melodic-techno recordings (main sections), for orientation; your genre
-and your references will differ, so measure your own:
+Coarse ranges we measured on two commercial melodic-techno recordings (main sections), for orientation. They are for
+that style only: a downtempo piece with a sustained bass reads far outside them and needn't be wrong. Measure your own:
     loudness -9 to -10 LUFS integrated, with a median 1 s crest of 9-10 dB
     3-8 kHz share of the whole: -22 to -26 dB;  share kept by a phone-sized speaker (300 Hz-10 kHz): -12 to -14 dB
     loudest 1 s of the 2.5-4 kHz band: about -28 dBFS (at those loudnesses)

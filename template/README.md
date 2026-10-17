@@ -15,6 +15,28 @@ study of one idea and ask. "Is this the right world? What would you put on to ge
 from them settles more than an hour of your guessing. The checks' target ranges here come from two melodic-techno
 recordings; your person's taste may want others (`tools/measures.py profile` on a track they like gives you theirs).
 
+## Building from scratch
+
+If you'd rather make every sound yourself (or you're asked to), the template is still your structure: the score as
+data at the top, the stems saved at their mixed levels, the `BREAKS` / `FAULT_TRIPS` pattern, and the master through
+`kit.master`. Its instruments are the kick, clap and hats it borrows from Engine plus its own bass and pad blocks; swap
+those for yours. Two cold agents did this, one making house and one downtempo, in under an hour each.
+
+One diagnostic saves rounds: **compare kick punch on the sum of your stems with kick punch on the mastered mix.** If
+the master costs more than about 2 dB, beat-aligned peaks (kick, clap, lead attacks together) are feeding the
+limiter: saturate the clap, soft-clip the drum bus, or master a dB or two quieter. Lowering the kick makes it worse.
+
+The kernel has no plain sine or FM oscillator; numpy does those well (`np.sin(2 * np.pi * np.cumsum(f) / SR)` for a
+gliding sine). `dsp.ladder(..., drive=0)` is a linear ladder.
+
+## Plumbing (`kit.py`, genre-neutral)
+
+`kit.place(dst, hit, [(t, gain), ...], sr, gain)` adds hits into a buffer; `kit.adsr(n, sr, a, d, s, r, gate_s)`;
+`kit.pan(x, p)` (equal power, -1..+1); `kit.duck(times, n, sr, depth, rel)` a ramped ducking curve; `kit.up(ctrl, tc,
+n, sr)` control rate to audio rate; `kit.master(mix_n2, sr, lufs)` high-pass, loudness and true-peak limiter;
+`kit.write_outputs(name, mix, stems, score, sr)`. Save stems as they sit in the mix, plus a raw copy of anything whose
+tuning you check.
+
 ## Instruments you can borrow
 
 Import them with the template's two path lines (`sys.path[:0] = [ROOT, os.path.join(ROOT, 'engine')]`, plus
@@ -31,8 +53,6 @@ From `engine/song.py` (`import song as S`):
 | `S.ks_note(sr, hz)` | A struck metal bar: Karplus-Strong with a fractional delay, bright and long. |
 | `S.doot(sr, hz, open_, accent)` | A round pluck, saw and square through a ladder; `open_` 0 (muffled) to 1 (clear). |
 | `S.cloog(tc, f0, cut, amp, dc, ratio, blend, dist)` | The singing engine: detuned saws plus a hard-synced saw whose resonant peak walks the harmonics (`ratio`). Control-rate arrays at 1 kHz (`tc`); read `render()` for how it is driven. |
-| `S.place(dst, hit, [(t, gain), ...], sr, gain)` | Add a hit into a buffer at times in seconds. |
-| `S.sidechain(times, n, sr, depth, rel)` | A gain curve that ducks at each kick time and recovers. |
 | `S.analog_env(tc, t0, att, hold, dec)`, `S.drift(n, rate, cents, seed)`, `S.peq(x, sr, f0, gain_db, q)` | An envelope, slow pitch drift, a peaking EQ. |
 
 From `moire/moire.py` (`import moire as M`):
@@ -50,3 +70,14 @@ res, drive)`, `dsp.svf_bp(x, fc, sr, q)`, `dsp.phaser(x, sr)`, `dsp.tapedelay(x,
 `dsp.pingpong(L, R, delay_s, sr)`, `dsp.reverb(L, R, sr, rt60)`, `dsp.ks(exc, sr, freq)`, `dsp.butter(x, fc, sr,
 kind)`, `dsp.limiter(x_n2, sr, ceiling_db)`, `dsp.lufs(x_n2, sr)`, `dsp.true_peak_db(x_n2)`. Frequencies and cutoffs
 are per-sample arrays (a constant can be broadcast); stereo arrays for the limiter and loudness are shaped (n, 2).
+Quirks worth knowing before they cost you a render: `svf_bp` takes Q (not damping) and has unity *peak* gain, so
+band-passed noise comes out with large peaks; `tapedelay` returns the wet signal only, low-passed at `damp_hz` even
+with `fb=0`; `reverb` and `pingpong` return wet (L, R) too; `limiter` and `lufs` want (n, 2), while
+`tools/measures.load` returns (channels, n).
+
+## Targets outside melodic techno
+
+The ranges in `tools/measures.py` and the template's checks come from melodic techno. Other styles differ, sometimes
+a lot (a downtempo piece with a sustained bass read +2.8 dB of kick punch and -3 dB phone share, and neither was
+necessarily wrong). Report those numbers rather than gating on them until you have a reference in the style, or your
+person's ear, to calibrate against.
