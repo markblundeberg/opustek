@@ -8,7 +8,8 @@ As a library (the tracks' check suites import it):
 
     from measures import load, db, Grid, band_share, phone_share, kick_punch, loudest_second, repetition, bed_fill,
                          sixteenth_levels, period_of, pitch_sim, side_ratio, crest, ending_steps, loudness,
-                         onsets, masking, kick_onset_contrast, master_cost, find_grid, syncopation, swing_of   (and Grid.ts for swung 16ths)
+                         onsets, masking, kick_onset_contrast, master_cost, find_grid, syncopation, swing_of,
+                         part_profile   (and Grid.ts for swung 16ths)
 
     load(path) -> (sr, x) with x shaped (channels, n); the kernel's dsp.lufs and dsp.true_peak_db want (n, 2), so use
     loudness(x, sr), or pass x.T. loudest_second -> (dBFS, time); repetition -> (next bar, 4 bars later);
@@ -246,6 +247,47 @@ def swing_of(y, sr, bpm, t0=0.0, t1=None, lo=2500, hi=12000):
     return float(sw), float(strength)
 
 
+def _pitch_at(y, sr, t, dur=0.09, lo=24, hi=62):
+    """The MIDI note whose first four harmonics carry the most just after t (harmonic summation), or None."""
+    seg = y[int((t + 0.012) * sr):int((t + 0.012 + dur) * sr)]
+    if len(seg) < 256:
+        return None
+    X = np.abs(np.fft.rfft(seg * np.hanning(len(seg)), 1 << 15))
+    f = np.fft.rfftfreq(1 << 15, 1 / sr)
+    def score(m):
+        tot = 0.0
+        for h, w in ((1, 1.0), (2, 0.9), (3, 0.6), (4, 0.4)):
+            i = int(np.searchsorted(f, h * 440 * 2 ** ((m - 69) / 12)))
+            tot += w * X[max(0, i - 2):i + 3].max()
+        return tot
+    return max(range(lo, hi + 1), key=score)
+
+
+def part_profile(stem, sr, grid, b0, b1, swing=0.5, rise_db=6.0, pitch=True, lo=24, hi=62):
+    """What a part does, from its stem (yours, or one separated from a reference by tools/refscope), bars b0 to b1
+    (exclusive): notes per beat; the share of its onsets on the beat, the 'e', the 'and' and the 'a'; the share of
+    beats with no new note; and, with pitch (one harmonic-sum note per onset, MIDI lo-hi; the default suits a bass),
+    the share of notes that change pitch, jump an octave or leap more than a whole tone, and the median note.
+
+    Calibrated by the second cold agent on its own piece, true stem against the stem refscope separated from its mix:
+    notes per beat read a little low (3.5 against 4.0) and on-beat share low (14-16% against 25%: the kick and the
+    duck hide those onsets), while the pitch shares held within 0.03. So compare a reference's separated part with
+    your own separated the same way, not with your true stem. Written from that agent's helper; for a melody, raise
+    lo and hi."""
+    y = mono(stem)
+    h = onsets(y, sr, grid, b0, b1, rise_db=rise_db, swing=swing)
+    idx = np.flatnonzero(h)
+    out = {'notes_per_beat': round(len(idx) / max(1, len(h) / 4), 2),
+           'position_share': [round(float(v), 2) for v in np.bincount(idx % 4, minlength=4) / max(1, len(idx))],
+           'empty_beats': round(float((~h.reshape(-1, 4).any(1)).mean()), 2)}
+    if pitch and len(idx) > 1:
+        p = [q for q in (_pitch_at(y, sr, grid.ts(b0, k, swing), lo=lo, hi=hi) for k in idx) if q is not None]
+        iv = np.abs(np.diff(p))
+        out.update(pitch_changes=round(float((iv > 0).mean()), 2), octave_jumps=round(float((iv == 12).mean()), 2),
+                   leaps=round(float(((iv > 2) & (iv != 12)).mean()), 2), median_midi=float(np.median(p)))
+    return out
+
+
 def masking(part, other, sr, lo, hi, t0, t1):
     """How far a part stands over another in the part's own band: RMS of each in [lo, hi] over [t0, t1], dB (part
     minus other). Below about +3 dB, a listener said of an arpeggio "I can't hear it at all" (it read -8.9 there)."""
@@ -343,12 +385,13 @@ def bed_fill(y, sr, grid, b0, b1):
     return float(lit.mean()), float((lit & (np.abs(A - B) < 3)).mean())
 
 
-def ending_steps(y, sr, t0, step=0.5, skip=0):
+def ending_steps(y, sr, t0, step=0.5, skip=0, band=None):
     """After t0, the level in half-second steps (dB re the first) and the biggest rise and fall between steps
     while still audible (above -30 dB re the first). A boom 20 dB up out of a fade hid here for six versions.
     If the ending starts on a hit, its own decay is a big first fall: skip that many steps before judging (Moiré's
-    check skips 2, the final hit's first second)."""
-    y = mono(y)
+    check skips 2, the final hit's first second). Run it on band=(40, 160) as well: a stray kick under a held lead
+    note read +3.6 dB on the whole mix and +6.3 in that band (found by the second cold agent)."""
+    y = mono(y) if band is None else _bandpass(mono(y), sr, *band)
     lv = np.array([db(np.mean(y[int((t0 + k * step) * sr):int((t0 + (k + 1) * step) * sr)] ** 2))
                    for k in range(int((len(y) / sr - t0) / step))])
     lv = lv - lv[0]
@@ -614,6 +657,22 @@ def selftest():
     w62, s62 = swing_of(hats(0.62) + kk, sr, 124)
     w50, _ = swing_of(hats(0.5) + kk, sr, 124)
     report('swing_of', abs(w62 - 0.62) < 0.03 and abs(w50 - 0.5) < 0.03, f'hats swung at 0.62 read {w62:.3f}, straight {w50:.3f} (strength {s62:.2f})')
+    # part_profile: a bass on known steps and notes (the 'and' and the 'a', octave jumps every other note) reads them
+    bl = np.zeros(n)
+    want_pos, notes = np.zeros(4), []
+    ub = np.arange(int(0.12 * sr)) / sr
+    for k in range(4 * 16):
+        if k % 4 in (2, 3) and (k // 4) % 2 == 0:
+            m_ = 33 + 12 * (len(notes) % 2)
+            notes.append(m_)
+            want_pos[k % 4] += 1
+            f0 = 440 * 2 ** ((m_ - 69) / 12)
+            i = int(g.ts(1, k) * sr)
+            bl[i:i + len(ub)] += signal.sawtooth(2 * np.pi * f0 * ub) * np.exp(-ub / 0.05) * 0.3
+    pp = part_profile(bl, sr, g, 1, 5)
+    report('part_profile', pp['position_share'] == [0.0, 0.0, 0.5, 0.5] and abs(pp['notes_per_beat'] - 1.0) < 1e-9
+           and pp['empty_beats'] == 0.5 and pp['octave_jumps'] == 1.0 and pp['median_midi'] == 39.0,
+           f"notes a beat {pp['notes_per_beat']} (1.0), empty beats {pp['empty_beats']} (0.5), positions {pp['position_share']}, octave jumps {pp['octave_jumps']}, median MIDI {pp['median_midi']} (39)")
     # syncopation: four on the floor and rolling 16ths score 0; pushes onto the 'a' score 2 per beat; noise's few
     # onsets score little
     four = np.arange(64) % 4 == 0
