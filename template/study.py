@@ -39,6 +39,7 @@ BASS = [b for b in R(9, NBARS) if b != TAKE]
 PAD = R(17, NBARS)
 ROOTS = [40, 36, 43, 38]                       # E2 C2 G2 D2, one per bar of a 4-bar loop
 CHORDS = [[64, 67, 71], [60, 64, 67], [62, 67, 71], [62, 66, 69]]   # Em C G D
+KICK_GAIN, LUFS_TARGET = 0.8, -10.0           # named, so you can sweep them: the loudness target is the main lever on kick punch
 BREAKS = {'kick-in-take-away': 'the kick keeps playing through bar 16', 'sub-fills-gaps': 'a held sub-bass under the bass, not ducked, filling the gaps between kicks'}
 
 
@@ -50,7 +51,7 @@ def render(brk=None):
     kicks = [tb(b, q) for b in kick_bars for q in range(4)]
 
     kick = np.zeros(N)
-    S.place(kick, S.kick_hit(SR), [(t, 1.0) for t in kicks], SR, 0.8)
+    S.place(kick, S.kick_hit(SR), [(t, 1.0) for t in kicks], SR, KICK_GAIN)
     clap = np.zeros(N)
     S.place(clap, S.clap_hit(SR), [(tb(b, q), 1.0) for b in CLAP for q in (1, 3)], SR, 0.35)
     hL, hR = np.zeros(N), np.zeros(N)
@@ -96,8 +97,8 @@ def render(brk=None):
     mix = np.stack([L, Rr], 1)
     mix = np.stack([dsp.butter(mix[:, 0], 15, SR, 'high', 2), dsp.butter(mix[:, 1], 15, SR, 'high', 2)], 1)
     mix = mix + 10 ** (4 / 20) * np.stack([dsp.butter(mix[:, c], 4000, SR, 'high', 2) for c in range(2)], 1) - np.stack([dsp.butter(mix[:, c], 4000, SR, 'high', 2) for c in range(2)], 1)   # a +4 dB shelf above 4 kHz
-    for _ in range(6):                                      # master: -10 LUFS through a true-peak limiter at -1.2 dBTP
-        mix = dsp.limiter(mix * 10 ** ((-10.0 - dsp.lufs(mix, SR)) / 20), SR, ceiling_db=-1.2, rel_ms=60)
+    for _ in range(6):                                      # master: LUFS_TARGET through a true-peak limiter at -1.2 dBTP
+        mix = dsp.limiter(mix * 10 ** ((LUFS_TARGET - dsp.lufs(mix, SR)) / 20), SR, ceiling_db=-1.2, rel_ms=60)
     mix *= np.clip((dur - t) / 1.5, 0, 1)[:, None]
     stems = {'kick': kick, 'clap': clap, 'hats': (hL + hR) / 2, 'bass': bass, 'pad': pad}
     score = {'bpm': BPM, 'bar': BAR, 'nbars': NBARS, 'take': TAKE, 'kicks': kicks, 'clap_bars': CLAP, 'bass_bars': BASS, 'pad_bars': PAD}

@@ -7,11 +7,13 @@ clean case from a broken one, and read a null input as nothing.
 As a library (the tracks' check suites import it):
 
     from measures import load, db, Grid, band_share, phone_share, kick_punch, loudest_second, repetition, bed_fill,
-                         sixteenth_levels, period_of, pitch_sim, side_ratio, crest, ending_steps, loudness
+                         sixteenth_levels, period_of, pitch_sim, side_ratio, crest, ending_steps, loudness,
+                         onsets, masking
 
     load(path) -> (sr, x) with x shaped (channels, n); the kernel's dsp.lufs and dsp.true_peak_db want (n, 2), so use
     loudness(x, sr), or pass x.T. loudest_second -> (dBFS, time); repetition -> (next bar, 4 bars later);
-    bed_fill -> (lit, held); ending_steps -> (levels, biggest rise, biggest fall while audible); period_of -> (lag, {lag: r}).
+    bed_fill -> (lit, held); ending_steps -> (levels, biggest rise, biggest fall while audible); period_of -> (lag, {lag: r});
+    onsets -> one bool per 16th step; masking -> dB (part over other, in the part's band).
 
 As a tool, a coarse profile of any finished mix, yours or a reference you own, to set targets:
 
@@ -117,7 +119,10 @@ def loudest_second(y, sr, lo=2500, hi=4000, win=1.0, hop=0.5):
 def kick_punch(y, sr, kicks, lo=50, hi=160, after=0.03, between=0.5):
     """How far the kick stands out of the low end: mean power in [lo, hi] in the 30 ms after each kick against the
     power halfway to the next beat, dB. When the bass fills the gaps the kick gets 'swallowed'; the duck may have
-    recovered long before halfway, so look at the bass's own level first."""
+    recovered long before halfway, so look at the bass's own level first. The other common cause is the master: a
+    loud loudness target makes the limiter clamp the kick's first 100 ms. Measure with the limiter bypassed too; if
+    the number jumps (one piece read +9.1 limited, +13.2 bypassed), the loudness target is your lever, and lowering
+    the kick makes it worse."""
     e = _bandpass(mono(y), sr, lo, hi) ** 2
     ks = np.asarray(kicks)
     if len(ks) < 3:
@@ -126,6 +131,33 @@ def kick_punch(y, sr, kicks, lo=50, hi=160, after=0.03, between=0.5):
     on = [e[int(k * sr):int((k + after) * sr)].mean() for k in ks[:-1]]
     off = [e[int((k + between * gap - after / 2) * sr):int((k + between * gap + after / 2) * sr)].mean() for k in ks[:-1]]
     return float(db(np.mean(on)) - db(np.mean(off)))
+
+
+def onsets(stem, sr, grid, b0, b1, rise_db=6.0, floor_db=-50.0, win=0.03):
+    """Which 16th steps of a stem have a note starting, from bar b0 up to b1 (exclusive): a step counts when any
+    octave band (125 Hz-8 kHz) rises by rise_db from the 30 ms before it to the 30 ms after, above floor_db re the
+    stem's loudest step. Octave bands, because a broadband level misses a high note right after a low one still
+    ringing. Returns a boolean array, one per step. Count them per bar and compare with the score's intent, not with
+    the render's own note list (that check would pass a missing part)."""
+    y = mono(stem)
+    bands = [(125 * 2 ** k, 250 * 2 ** k) for k in range(6)]
+    E = [_bandpass(y, sr, lo, hi) ** 2 for lo, hi in bands]
+    steps = [grid.tb(b0) + k * grid.six for k in range((b1 - b0) * 16)]
+    w = int(win * sr)
+    post = np.array([[e[int(t * sr):int(t * sr) + w].mean() for e in E] for t in steps])
+    pre = np.array([[e[max(0, int(t * sr) - w):int(t * sr)].mean() if int(t * sr) > 0 else 1e-20 for e in E] for t in steps])
+    top = db(post.max())
+    loud = db(post) > top + floor_db
+    return ((db(post) - db(pre + 1e-20) >= rise_db) & loud).any(1)
+
+
+def masking(part, other, sr, lo, hi, t0, t1):
+    """How far a part stands over another in the part's own band: RMS of each in [lo, hi] over [t0, t1], dB (part
+    minus other). Below about +3 dB, a listener said of an arpeggio "I can't hear it at all" (it read -8.9 there)."""
+    a, b = int(t0 * sr), int(t1 * sr)
+    pa = _bandpass(mono(part)[a:b], sr, lo, hi)
+    po = _bandpass(mono(other)[a:b], sr, lo, hi)
+    return float(db(np.mean(pa ** 2)) - db(np.mean(po ** 2)))
 
 
 def sixteenth_levels(y, sr, grid, lo, hi, b0, b1, win=0.06):
@@ -356,6 +388,23 @@ def selftest():
     _, ra, _ = ending_steps(tail, sr, 0.0)
     _, rb, _ = ending_steps(boomed, sr, 0.0)
     report('ending_steps', ra < 3 and rb > 6, f'smooth fade biggest rise {ra:+.1f} dB; with a boom {rb:+.1f} dB')
+    # onsets: plucks on known steps, low and high alternating with long rings, found exactly; noise finds almost none
+    pl = np.zeros(n)
+    want = np.zeros(4 * 16, bool)
+    u = np.arange(int(0.4 * sr)) / sr
+    for k in range(4 * 16):
+        if k % 3 == 0 or k == 0:
+            want[k] = True
+            f0 = 220 if (k // 3) % 2 == 0 else 880
+            i = int((g.tb(1) + k * g.six) * sr)
+            pl[i:i + len(u)] += np.sign(np.sin(2 * np.pi * f0 * u)) * np.exp(-u / 0.15) * 0.3
+    got = onsets(pl, sr, g, 1, 5)
+    fn = onsets(rng.standard_normal(n) * 0.1, sr, g, 1, 5)
+    report('onsets', np.array_equal(got, want) and fn.mean() < 0.05, f'{got.sum()} of {want.sum()} plucks found, {int((got & ~want).sum())} extra; on noise {fn.mean():.0%} of steps (< 5%)')
+    # masking: a part 10 dB over another in its band reads about +10; equal reads about 0
+    a_ = rng.standard_normal(n)
+    m1, m0 = masking(a_, a_ * 10 ** (-10 / 20), sr, 600, 1400, 0, 10), masking(a_, rng.standard_normal(n), sr, 600, 1400, 0, 10)
+    report('masking', abs(m1 - 10) < 0.2 and abs(m0) < 0.5, f'10 dB over: {m1:+.1f}; equal noise: {m0:+.1f}')
     print('  ->', 'every measure tells its cases apart' if ok else 'a measure is blind')
     return ok
 

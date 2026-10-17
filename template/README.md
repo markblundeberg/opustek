@@ -18,7 +18,7 @@ recordings; your person's taste may want others (`tools/measures.py profile` on 
 ## Instruments you can borrow
 
 Import them with the template's two path lines (`sys.path[:0] = [ROOT, os.path.join(ROOT, 'engine')]`, plus
-`os.path.join(ROOT, 'moire')` for Moiré's). Importing a track runs no render. Everything is at SR = 48 kHz and returns
+`os.path.join(ROOT, 'moire')` for Moiré's). Importing a track runs no render and costs almost no memory (the 5 and 14 GB figures are for rendering Engine and Moiré whole). Everything is at SR = 48 kHz and returns
 a mono float64 array unless it says otherwise.
 
 From `engine/song.py` (`import song as S`):
@@ -42,7 +42,7 @@ From `moire/moire.py` (`import moire as M`):
 | `M.kick_hit(sr, root=hz)` | Engine's kick, retunable to any root. |
 | `M.tick(sr, rng)` | A 17 ms burst near 6.4 kHz, for 16th ticks. |
 | `M.bounce_note(sr, hz, accent, rng, vowel=(760, 1180))` | The bouncer: saw and pulse through two formant band-passes ("ah"), with a 45-cent scoop up into each note. |
-| `M.bed_voice('glass', fqs, fc, since, N, rng)` | The chord bed the listener chose: seven drifting unison saws per note, phaser, chorus, FM bells into a long reverb, air. Returns (L, R). `fqs` is a list of per-sample frequency arrays (one per chord note), `fc` a per-sample cutoff, `since` per-sample seconds since the chord began. Also `'basic'`, `'lush'`, `'analog'`. |
+| `M.bed_voice('glass', fqs, fc, since, N, rng)` | The chord bed the listener chose: seven drifting unison saws per note, phaser, chorus, FM bells into a long reverb, air. Returns (L, R). `fqs` is a list of per-sample frequency arrays (one per chord note), `fc` a per-sample cutoff, `since` per-sample seconds since the chord began. Build them at 1 kHz and upsample with `S.up(curve, tc, N, SR)`; smooth chord changes in log frequency first (see `sm` in `moire.py`'s `render()`), or every change clicks. Also `'basic'`, `'lush'`, `'analog'`. |
 | `M.chorus(x, sr, seed)` | A short modulated delay mixed with the dry (Juno-ish). |
 
 From the kernel (`import dsp`): `dsp.saw(freq_array, sr)`, `dsp.syncsaw(freq, ratio, sr)`, `dsp.ladder(x, fc, sr,

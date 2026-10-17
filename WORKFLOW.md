@@ -115,7 +115,7 @@ These are your ears, with their calibrations. Each was built to answer one of th
 | Tonal balance | Band levels re the whole, per section, against the references' *range per section* | e.g. 3–8 kHz at −22 to −26 dB of the whole | A mix 6–8 dB darker than all three references |
 | Phone survival | Share of power in 300 Hz–10 kHz | References −12 to −14 dB | Drop 1 kept −15.6 dB, so it sounded thin on a phone |
 | Mono | L+R vs L,R power per band | References lose about 0.2 dB | Nothing; worth checking anyway |
-| Kick punch | Low-band level at the kick vs between kicks | Reference with bass: about +12 dB | The bass filling the gaps (+10) |
+| Kick punch | Low-band level at the kick vs between kicks; also with the master limiter bypassed | Reference with bass: about +12 dB | The bass filling the gaps (+10); in another piece the limiter clamping the kick at the loudness target (+9 limited, +13 bypassed) |
 | Mud | 120–300 Hz energy *by stem* | — | The kick, not the bass: 95% of the mud |
 | Harshness | The *loudest second* of 2.5–4 kHz, absolute dBFS | References' loudest second: −28 dBFS | One second at 1:08, 7 dB hot, hidden by every section average |
 | Repetition | Cosine similarity of bars 4 apart: log-mel × 16 sixteenths, each band's mean over the bar removed | One reference 0.53–0.61; drafts heard as repetitive 0.71–0.87 | Drafts that tired the listener |
