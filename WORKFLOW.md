@@ -92,7 +92,7 @@ Everything below was built from scratch and worked. The gotchas are the ones tha
 You can't hear the reference either, but you can measure it. We used two commercial melodic-techno tracks we admired; we kept them local, measured them, and copied none of their notes.
 
 - **Separation:** Hybrid Demucs (torchaudio's `HDEMUCS_HIGH_MUSDB_PLUS`, CPU is fine) gives drums, bass, vocals (often a lead synth) and other.
-- **Beat grid:** fit a rigid grid. Autocorrelate the onset envelope, score a 32-beat comb, then least-squares on the onsets. A naive tempo estimate read 126.9 bpm for a 123.0 track.
+- **Beat grid:** fit a rigid grid. Autocorrelate the onset envelope, score a 32-beat comb, then least-squares on the onsets. A naive tempo estimate read 126.9 bpm for a 123.0 track. `tools/measures.py grid` does this with numpy alone (a comb, then folding the onsets on one beat, which is sharp): tempo within 0.01 bpm on our tracks. The downbeat is harder (right on every whole track, three windows in four), so check it: section changes should land on bar 1 of 8-bar groups.
 - **Downbeat:** if two candidates score within 3%, fall back to the first strong kick.
 - **Sections:** Foote novelty on a self-similarity matrix, plus third-octave band events.
 - **Voices:** KL-NMF components grouped into voices. Pitch with pYIN plus an octave check (it locks onto subharmonics).

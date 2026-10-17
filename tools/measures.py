@@ -8,7 +8,7 @@ As a library (the tracks' check suites import it):
 
     from measures import load, db, Grid, band_share, phone_share, kick_punch, loudest_second, repetition, bed_fill,
                          sixteenth_levels, period_of, pitch_sim, side_ratio, crest, ending_steps, loudness,
-                         onsets, masking, kick_onset_contrast, master_cost   (and Grid.ts for swung 16ths)
+                         onsets, masking, kick_onset_contrast, master_cost, find_grid   (and Grid.ts for swung 16ths)
 
     load(path) -> (sr, x) with x shaped (channels, n); the kernel's dsp.lufs and dsp.true_peak_db want (n, 2), so use
     loudness(x, sr), or pass x.T. loudest_second -> (dBFS, time); repetition -> (next bar, 4 bars later);
@@ -17,9 +17,11 @@ As a library (the tracks' check suites import it):
 
 As a tool, a coarse profile of any finished mix, yours or a reference you own, to set targets:
 
+    python3 tools/measures.py grid track.wav                  # tempo and first downbeat, numpy only
     python3 tools/measures.py profile track.wav --bpm 124 --bar1 0.0 [--from 33 --to 64]
 
---bar1 is the time of the first downbeat in seconds (tools/refscope's analysis finds it, or read it off a spectrogram). The
+--bar1 is the time of the first downbeat in seconds. Leave out --bpm and find_grid supplies both: its tempo is
+reliable, its downbeat a good guess to confirm (its docstring says how good). The
 profile prints numbers only; keep any reference audio, and anything you extract from it, out of version control.
 
 Coarse ranges we measured on two commercial melodic-techno recordings (main sections), for orientation. They are for
@@ -315,6 +317,88 @@ def find_kicks(y, sr, grid, b0, b1):
     return out
 
 
+def _onset_env(y, sr, lo, hi, fps=400):
+    """Half-wave-rectified rise of the log energy in a band, `fps` frames per second (10 ms smoothing)."""
+    e = _bandpass(y, sr, lo, hi) ** 2
+    h = sr // fps
+    e = signal.lfilter([0.25] * 4, [1], e[:len(e) // h * h].reshape(-1, h).mean(1))
+    le = db(e + 1e-12)
+    d = np.maximum(np.diff(le, prepend=le[0]), 0)
+    d[le < le.max() - 60] = 0
+    return d
+
+
+KICK_CUE = 0.5
+
+
+def find_grid(y, sr, bpm_range=(70, 180), t0=0.0, t1=None):
+    """Tempo, first downbeat and confidence of a mix with one rigid tempo (most music made on a computer):
+    -> (bpm, bar1, info), bar1 the first downbeat at or after t0, ready for Grid(bpm, bar1).
+
+    Tempo: an autocorrelation comb shortlists tempos, then each is refined by folding the onsets on one beat and
+    keeping the tempo that piles the most into the narrowest slot (it uses every harmonic, so it is sharp).
+    Downbeat: chords, bass notes and sections change on beat 1, so it compares half a bar of spectrum before and after
+    every 8th, adds how much kick lands on that 8th, and picks the 8th of the bar that scores highest (8, not 4: a
+    syncopated beat like 2-step can fold half a beat out).
+
+    On our five tracks (90-132 bpm; four-on-the-floor, broken-beat, 2-step): tempo within 0.01 bpm over a whole track
+    and 0.1 bpm over any 60 s; beats within 5 ms. The downbeat was right on every whole track but on only 19 of 25
+    windows of 60 s, and the kick cue's weight was tuned on those same windows, so expect less on music unlike ours.
+    info['downbeat_margin'] doesn't flag the wrong ones: confirm the downbeat (section changes should land on bar 1
+    of 8-bar groups) before trusting bar numbers. A tempo off by a factor of 2 is possible on sparse music; narrow
+    bpm_range if you know better. info['fold'] reads about 0.05 for noise and 0.12-0.43 for our tracks."""
+    y = mono(y)
+    t1 = len(y) / sr if t1 is None else t1
+    y = y[int(t0 * sr):int(t1 * sr)]
+    fps = 400
+    low = _onset_env(y, sr, 40, 160, fps)
+    rest = sum(_onset_env(y, sr, lo, hi, fps) for lo, hi in ((160, 600), (600, 2500), (2500, 10000)))
+    on = low / (low.std() + 1e-12) + 0.5 * rest / (rest.std() + 1e-12)
+    fr = np.arange(len(on))
+    on0 = on - on.mean()
+    ac = signal.fftconvolve(on0, on0[::-1], 'full')[len(on) - 1:]
+    ac /= ac[0]
+    cands = np.arange(bpm_range[0], bpm_range[1], 0.05)
+    comb = np.array([np.mean([np.interp(k * 60 / b * fps, fr, ac) for k in (1, 2, 3, 4)]) for b in cands])
+
+    def fold(b, nbin=96):
+        ph = (fr / fps * b / 60) % 1
+        h = np.bincount((ph * nbin).astype(int), on, nbin)
+        hs = np.convolve(np.r_[h[-2:], h, h[:2]], np.ones(5), 'valid')
+        i = int(hs.argmax())
+        w = np.arange(i - 6, i + 7)
+        ang = np.angle((h[w % nbin] * np.exp(2j * np.pi * (w + 0.5) / nbin)).sum())
+        return hs[i] / on.sum(), (ang / (2 * np.pi)) % 1
+
+    best = (-1, None)
+    for b in cands[np.argsort(comb)[::-1][:5]]:
+        fine = np.arange(b - 0.15, b + 0.15, 0.002)
+        f_ = np.array([fold(f)[0] for f in fine])
+        if f_.max() > best[0]:
+            best = (f_.max(), fine[f_.argmax()])
+    conc, bpm = best
+    beat = 60 / bpm
+    ph = fold(bpm)[1] * beat - 0.006                 # the onset envelope reads about 6 ms late on our tracks
+    e8, W = beat / 2, 4                         # half a bar each side: one bar failed a track, two beats none
+    n8 = int((len(y) / sr - ph) / e8) - 1
+    f, _, S = signal.stft(y, sr, nperseg=2048, noverlap=2048 - 256)
+    tS = np.arange(S.shape[1]) * 256 / sr
+    P = np.abs(S[(f > 30) & (f < 2000)]) ** 2
+    spec = np.array([P[:, (tS >= ph + k * e8) & (tS < ph + (k + 1) * e8)].mean(1) for k in range(n8)])
+    cs = np.r_[np.zeros((1, spec.shape[1])), np.cumsum(spec, 0)]
+    chg = np.array([np.linalg.norm(db((cs[j] - cs[j - W]) / W + 1e-12) - db((cs[j + W] - cs[j]) / W + 1e-12))
+                    for j in range(W, n8 - W)])
+    s8 = np.array([chg[(k - W) % 8::8].mean() for k in range(8)])
+    # and the low band's onsets on each 8th of the bar: whatever the pattern, the kick is surest on beat 1
+    hit = np.array([low[max(0, int((ph + j * e8 - 0.01) * fps)):int((ph + j * e8 + 0.03) * fps)].sum() for j in range(n8)])
+    k8 = np.array([hit[k::8].mean() for k in range(8)])
+    s8 = s8 / s8.mean() + KICK_CUE * k8 / (k8.mean() + 1e-12)
+    k = int(s8.argmax())
+    bar1 = t0 + (ph + k * e8 + 0.02) % (4 * beat) - 0.02
+    return float(bpm), float(bar1), {'fold': round(float(conc), 3),
+                                      'downbeat_margin': round(float(np.sort(s8)[-1] / np.sort(s8)[-2]), 3)}
+
+
 def profile(path, bpm, bar1, b0=None, b1=None):
     sr, x = load(path)
     g = Grid(bpm, bar1)
@@ -454,6 +538,29 @@ def selftest():
     clipped = np.clip(kk * 6, -0.5, 0.5)
     mc, m0 = master_cost(kk, clipped, sr, beats), master_cost(kk, kk, sr, beats)
     report('master_cost', mc > 2 and abs(m0) < 1e-6, f'a hard limiter costs {mc:+.1f} dB of punch; no master {m0:+.1f}')
+    # grid: a synthetic track at 117.3 bpm, first downbeat at 0.37 s (kick on beats, hat on offbeats, a chord per bar)
+    # is found to 0.05 bpm and 15 ms with the right downbeat; noise folds no better than chance
+    gg = Grid(117.3, 0.37)
+    m = int(40 * sr)
+    tt = np.arange(m) / sr
+    syn = np.zeros(m)
+    u = np.arange(int(0.25 * sr)) / sr
+    kh = np.sin(2 * np.pi * np.cumsum(50 + 120 * np.exp(-u / 0.02)) / sr) * np.exp(-u / 0.12)
+    hh = rng.standard_normal(len(u)) * np.exp(-u / 0.01) * 0.1
+    for b in range(1, 20):
+        for q in range(4):
+            for hit, at in ((kh, gg.tb(b, q)), (hh, gg.tb(b, q + 0.5))):
+                i = int(at * sr)
+                if i + len(u) < m:
+                    syn[i:i + len(u)] += hit
+        i0, i1 = int(gg.tb(b) * sr), min(m, int(gg.tb(b + 1) * sr))
+        root = (110, 147, 123, 165)[b % 4]
+        syn[i0:i1] += sum(0.08 * np.sin(2 * np.pi * root * r * tt[i0:i1]) for r in (1, 1.2, 1.5))
+    gb, g1, gi = find_grid(syn, sr)
+    ge = ((g1 - 0.37 + gg.bar / 2) % gg.bar - gg.bar / 2) * 1000
+    _, _, ni = find_grid(rng.standard_normal(m) * 0.1, sr)
+    report('find_grid', abs(gb - 117.3) < 0.05 and abs(ge) < 15 and ni['fold'] < 0.08,
+           f'{gb:.3f} bpm (made at 117.3), first downbeat {ge:+.0f} ms off; fold {gi["fold"]:.2f}, noise {ni["fold"]:.2f} (< 0.08)')
     print('  ->', 'every measure tells its cases apart' if ok else 'a measure is blind')
     return ok
 
@@ -463,12 +570,25 @@ if __name__ == '__main__':
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('profile', help='a coarse profile of a mix')
     p.add_argument('wav')
-    p.add_argument('--bpm', type=float, required=True)
+    p.add_argument('--bpm', type=float, help='omit to find the grid (and check what it found)')
     p.add_argument('--bar1', type=float, default=0.0, help='time of the first downbeat, s')
     p.add_argument('--from', dest='b0', type=int)
     p.add_argument('--to', dest='b1', type=int)
+    q = sub.add_parser('grid', help='find tempo and first downbeat')
+    q.add_argument('wav')
+    q.add_argument('--from-s', dest='t0', type=float, default=0.0)
+    q.add_argument('--to-s', dest='t1', type=float)
     sub.add_parser('selftest', help='each measure against known cases')
     a = ap.parse_args()
     if a.cmd == 'selftest':
         sys.exit(0 if selftest() else 1)
+    if a.cmd == 'grid':
+        sr, x = load(a.wav)
+        bpm, bar1, info = find_grid(x, sr, t0=a.t0, t1=a.t1)
+        print(json.dumps({'bpm': round(bpm, 3), 'bar1': round(bar1, 4), **info}))
+        sys.exit(0)
+    if a.bpm is None:
+        sr, x = load(a.wav)
+        a.bpm, a.bar1, info = find_grid(x, sr)
+        print(f'found {a.bpm:.3f} bpm, first downbeat {a.bar1:.3f} s {info} (a guess for the downbeat: check it)', file=sys.stderr)
     print(json.dumps(profile(a.wav, a.bpm, a.bar1, a.b0, a.b1), indent=1))

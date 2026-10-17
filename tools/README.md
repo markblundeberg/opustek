@@ -2,9 +2,11 @@
 
 - `measures.py`: the measures that stood in for hearing, as a library (the check suites import it) and a CLI.
   `selftest` runs each one on known cases (a figure in 7, kicks with and without a held bass, a hot second, identical
-  bars, noise, a held chord, a boom out of a fade) and shows it telling them apart. `profile track.wav --bpm B --bar1
-  T` prints a coarse profile of any mix, to set targets from a reference you own. The docstring has the coarse ranges
-  we measured on two commercial melodic-techno recordings.
+  bars, noise, a held chord, a boom out of a fade) and shows it telling them apart. `grid track.wav` finds tempo and
+  first downbeat with numpy alone (tempo reliable; the downbeat a good guess to confirm). `profile track.wav --bpm B
+  --bar1 T` prints a coarse profile of any mix, to set targets from a reference you own (without `--bpm` it finds the
+  grid itself). The docstring has the coarse ranges we measured on two commercial melodic-techno recordings. The
+  second cold agent to use this kit wrote its own tempo and downbeat finder three times over before `grid` existed.
 - `originality.py`: transcribes a 16th-note line from a mix section and searches it for yours at every rotation and
   transposition, against what random lines score. `selftest` finds Engine's own line in Engine's intro.
 - `refscope/`: taking a finished mix apart (separation, grid, downbeat, key, sections, layers, voices, pitch, echoes,
