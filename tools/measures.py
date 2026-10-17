@@ -8,7 +8,7 @@ As a library (the tracks' check suites import it):
 
     from measures import load, db, Grid, band_share, phone_share, kick_punch, loudest_second, repetition, bed_fill,
                          sixteenth_levels, period_of, pitch_sim, side_ratio, crest, ending_steps, loudness,
-                         onsets, masking, kick_onset_contrast, master_cost, find_grid   (and Grid.ts for swung 16ths)
+                         onsets, masking, kick_onset_contrast, master_cost, find_grid, syncopation   (and Grid.ts for swung 16ths)
 
     load(path) -> (sr, x) with x shaped (channels, n); the kernel's dsp.lufs and dsp.true_peak_db want (n, 2), so use
     loudness(x, sr), or pass x.T. loudest_second -> (dBFS, time); repetition -> (next bar, 4 bars later);
@@ -181,6 +181,32 @@ def onsets(stem, sr, grid, b0, b1, rise_db=6.0, floor_db=-50.0, win=0.03, swing=
     top = db(post.max())
     loud = db(post) > top + floor_db
     return ((db(post) - db(pre + 1e-20) >= rise_db) & loud).any(1)
+
+
+def syncopation(hits):
+    """How syncopated a part is, from its onsets on 16th steps (onsets() on a stem, or the score's own steps): every
+    note that starts on a weak 16th and holds or rests over a stronger one scores the difference in metrical weight
+    (Longuet-Higgins and Lee's idea, with weights inside the beat only: on the beat 0, the 'and' -1, the 'e' and 'a'
+    -2; so it needs the beat right but not the downbeat, and it misses a note on 2 held over 3). Returns (score per
+    beat, notes per beat). Four on the floor and an even rolling 16th line both score 0; a line pushed onto the 'a'
+    before each beat scores 2 (a little less over a short span: the last note has no beat after it).
+
+    On true stems it reads what was written: a rolling darksynth bass 0.02, a 2-step organ 1.02 and sub 0.57. On
+    stems separated from a mix (tools/refscope), every onset the separation smears reads as a syncopation: that same
+    rolling bass read 0.97, so don't trust the score there. Notes per beat survives separation (2.7 for the rolling
+    bass, against 3.3 written) and was the number that told a listener's "more funky than ours" apart: one
+    reference album's bass, separated, played 0.9-1.15 notes a beat in all four tracks we measured, where our piece
+    rolled 16ths. Measure a reference's bass on a stem, never in a band of the full mix: the kick's tail and the
+    ducking pump read as a 16th pulse that isn't there."""
+    h = np.asarray(hits, bool)
+    w = np.array([0, -2, -1, -2])[np.arange(len(h)) % 4]
+    idx = np.flatnonzero(h)
+    score = 0.0
+    for i, j in zip(idx, np.r_[idx[1:], len(h)]):
+        if j > i + 1:
+            score += max(0, w[i + 1:j].max() - w[i])
+    beats = max(1, len(h) / 4)
+    return score / beats, len(idx) / beats
 
 
 def masking(part, other, sr, lo, hi, t0, t1):
@@ -538,6 +564,15 @@ def selftest():
     clipped = np.clip(kk * 6, -0.5, 0.5)
     mc, m0 = master_cost(kk, clipped, sr, beats), master_cost(kk, kk, sr, beats)
     report('master_cost', mc > 2 and abs(m0) < 1e-6, f'a hard limiter costs {mc:+.1f} dB of punch; no master {m0:+.1f}')
+    # syncopation: four on the floor and rolling 16ths score 0; pushes onto the 'a' score 2 per beat; noise's few
+    # onsets score little
+    four = np.arange(64) % 4 == 0
+    roll = np.ones(64, bool)
+    push = np.isin(np.arange(64) % 4, [3])
+    sf, sr_, sp = syncopation(four)[0], syncopation(roll)[0], syncopation(push)[0]
+    sn = syncopation(onsets(rng.standard_normal(n) * 0.1, sr, g, 1, 5))[0]
+    report('syncopation', sf == 0 and sr_ == 0 and abs(sp - 2) < 0.15 and sn < 0.3,
+           f'four on the floor {sf:.1f}, rolling 16ths {sr_:.1f}, pushed onto the a {sp:.1f}, noise {sn:.2f} per beat')
     # grid: a synthetic track at 117.3 bpm, first downbeat at 0.37 s (kick on beats, hat on offbeats, a chord per bar)
     # is found to 0.05 bpm and 15 ms with the right downbeat; noise folds no better than chance
     gg = Grid(117.3, 0.37)
