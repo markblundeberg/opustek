@@ -161,6 +161,7 @@ Every one of these got past my own checks at the time. Most were caught by the h
 | Lead "too much squelchy" | Too much resonance and envelope | Less of both |
 | Synthetic throat singers "dip into uncanny valley", "vocoded oooo" | A vocoder-like source; later a real vocal-tract model | Parked; see *too alien*, below |
 | Chord bed "pretty basic synth" | Six static detuned saws | Four level-matched candidates; the human picked "glass" |
+| Saw lead "still plain"; a pulse and a sync lead on the same notes were better | After its attack the saw barely changed: over a held note its harmonics moved about 4 dB, against 8 for the sync (a rising sync ratio) and 28 for the pulse (a resonant filter struck on each note). Its spectrum was also the smoothest (7 dB of resonant peaks, against 14 and 23). Three voices can't tell those two apart | A level-matched A/B of three voices; the human ranked pulse, sync, saw. With the chord bed above, static detuned saws have been heard as plain twice |
 
 ### Harmony
 | They said | What was wrong | Fix |
