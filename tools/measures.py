@@ -222,7 +222,7 @@ def swing_of(y, sr, bpm, t0=0.0, t1=None, lo=2500, hi=12000):
     read 0.57, straight ones 0.46-0.52)."""
     y = mono(y)
     t1 = len(y) / sr if t1 is None else t1
-    fps = 1000
+    fps = sr / round(sr / 1000)
     seg = y[int(t0 * sr):int(t1 * sr)]
     nbin = 200
 
@@ -406,7 +406,11 @@ def loudness(x, sr):
     import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     import dsp
-    return float(dsp.lufs(x.T.copy() if x.shape[0] <= 2 else x, sr)), float(dsp.true_peak_db(x.T.copy()))
+    from math import gcd
+    if sr != 48000:                       # the kernel's K-weighting is for 48 kHz: a bounce at 44.1 kHz is resampled
+        g = gcd(48000, sr)
+        x = signal.resample_poly(x, 48000 // g, sr // g, axis=-1)
+    return float(dsp.lufs(x.T.copy(), 48000)), float(dsp.true_peak_db(x.T.copy()))
 
 
 def find_kicks(y, sr, grid, b0, b1):
@@ -428,7 +432,7 @@ def find_kicks(y, sr, grid, b0, b1):
 def _onset_env(y, sr, lo, hi, fps=400):
     """Half-wave-rectified rise of the log energy in a band, `fps` frames per second (10 ms smoothing)."""
     e = _bandpass(y, sr, lo, hi) ** 2
-    h = sr // fps
+    h = int(round(sr / fps))              # callers pass the true rate, sr / h (44.1 kHz at 400 fps is 400.9)
     e = signal.lfilter([0.25] * 4, [1], e[:len(e) // h * h].reshape(-1, h).mean(1))
     le = db(e + 1e-12)
     d = np.maximum(np.diff(le, prepend=le[0]), 0)
@@ -458,7 +462,7 @@ def find_grid(y, sr, bpm_range=(70, 180), t0=0.0, t1=None):
     y = mono(y)
     t1 = len(y) / sr if t1 is None else t1
     y = y[int(t0 * sr):int(t1 * sr)]
-    fps = 400
+    fps = sr / round(sr / 400)
     low = _onset_env(y, sr, 40, 160, fps)
     rest = sum(_onset_env(y, sr, lo, hi, fps) for lo, hi in ((160, 600), (600, 2500), (2500, 10000)))
     on = low / (low.std() + 1e-12) + 0.5 * rest / (rest.std() + 1e-12)
@@ -705,6 +709,15 @@ def selftest():
     _, _, ni = find_grid(rng.standard_normal(m) * 0.1, sr)
     report('find_grid', abs(gb - 117.3) < 0.05 and abs(ge) < 15 and ni['fold'] < 0.08,
            f'{gb:.3f} bpm (made at 117.3), first downbeat {ge:+.0f} ms off; fold {gi["fold"]:.2f}, noise {ni["fold"]:.2f} (< 0.08)')
+    # any sample rate: a bounce at 44.1 kHz reads the same tempo, swing and loudness as at 48 kHz (frames of
+    # sr // 400 samples once ran 0.2% fast there, and read a 110 bpm track as 109.74)
+    syn44 = signal.resample_poly(syn, 147, 160)
+    b44 = find_grid(syn44, 44100)[0]
+    sw44 = swing_of(signal.resample_poly(hats(0.62) + kk, 147, 160), 44100, 124)[0]
+    st = np.stack([syn, syn])
+    l48, l44 = loudness(st, sr)[0], loudness(signal.resample_poly(st, 147, 160, axis=-1), 44100)[0]
+    report('sample rate', abs(b44 - 117.3) < 0.05 and abs(sw44 - 0.62) < 0.03 and abs(l44 - l48) < 0.05,
+           f'at 44.1 kHz: {b44:.3f} bpm (117.3), swing {sw44:.3f} (0.62), loudness {l44 - l48:+.2f} dB from 48 kHz')
     print('  ->', 'every measure tells its cases apart' if ok else 'a measure is blind')
     return ok
 
