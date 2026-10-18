@@ -32,6 +32,7 @@ gave you no seed, send a 30-60 s study of one idea and ask, rather than guessing
 | `engine/` | *Engine, Learning to Sing* (3:14, 123 bpm): the whole track in `song.py`, its checks, and its film (an 1890s engineering drawing that runs on the music). Its instruments (kick, clap, hats, plucks, the singing engine) are imported by the other tracks. |
 | `moire/` | *Moiré* (4:51, 124 bpm): two machines out of step, 7 against 5. The track, its checks (one per listener's note, by version), its film (three rings, one visible thing per sound) and the safety check. Its instruments (a retunable kick, the bouncer, the glass chord bed) are reusable too. |
 | `lantern/` | *Lantern* (1:03, 90 bpm downtempo): the cold test, made by a new agent from this repository and one line, every instrument built from the kernel. A good model of a first piece: its own instruments, checks and faults in about 500 lines. |
+| `firstlight/` | *First Light* (3:24, 106 bpm chill synthwave): a hook that assembles itself, heard in fragments until the first drop. Made by a new agent over six rounds, starting from a one-minute study in a reference's style and becoming its own piece; its README tells each round. Its instruments (a soft plucked string, a breath voice, a round bass, a gentle kit) are built from the kernel. |
 | `tools/measures.py` | The measures as a library and a CLI: tonal balance, phone survival, width, crest, loudest second, kick punch, repetition, bed fill, periodicity, endings. `python3 tools/measures.py selftest` shows each one telling known cases apart. `grid` finds a mix's tempo and downbeat (numpy only); `profile` gives a coarse profile of any mix. They take any WAV (16- or 24-bit or float, mono or stereo, 44.1 or 48 kHz), so a bounce from a DAW works too. |
 | `tools/originality.py` | Is our melody someone else's? Transcribes a reference section and searches it for your line at every alignment and transposition, against chance. |
 | `tools/refscope/` | Taking a finished mix apart: separation into stems, beat grid and downbeat, key, sections, layers and voices, pitch, echoes. Heavy (torch); calibrated on Engine, whose answers we know, and honest about what it can't see. |
@@ -45,6 +46,7 @@ From the repository root (outputs go to `out/`, which git ignores):
     python3 template/study.py && python3 template/check_study.py      # 10 s, 1.6 GB; then --selftest
     python3 engine/song.py && python3 engine/check_song.py            # 45 s, about 5 GB of memory
     python3 moire/moire.py && python3 moire/check_moire.py            # 2 min, about 14 GB of memory
+    python3 firstlight/firstlight.py && python3 firstlight/check_firstlight.py   # 3 min, about 7 GB
     python3 tools/measures.py selftest
     python3 tools/originality.py selftest                             # after engine/song.py
 

@@ -33,8 +33,10 @@ making two techno tracks with Mark listening to every version and sending notes.
 - *Moiré* (4:51): two machines play out of step, 7 against 5, over a steady beat, and meet only every 35 bars.
 - *Lantern* (1:03): a downtempo piece made from this repository by a new Claude agent with no memory of the other
   tracks, given one line and no reference. It's a good model of a first piece.
+- *First Light* (3:24): chill synthwave built around a hook that assembles itself, made by another new agent over six
+  rounds; it began as a one-minute study in the style of a reference album and became its own piece.
 
-All three are here as code, each with its checks; the first two reproduce the released audio bit for bit and come
+All four are here as code, each with its checks; the first two reproduce the released audio bit for bit and come
 with their film renderers. Listen and watch, with the story of how each was made, at
 **https://marklundeberg.com/opustek/**.
 
