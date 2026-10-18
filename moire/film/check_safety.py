@@ -6,12 +6,19 @@
   flash:   no more than 3 general flashes in any second (WCAG 2.3.1: a flash is a pair of opposing changes of
            relative luminance >= 0.1, the darker below 0.8, over >= 25% of any 640 x 360 window, full-HD scale);
            the same for saturated red
-  pattern (also screen-wide: broad stripes of five or more pairs across the width, at the same 0.08): regular stripes are a separate trigger (ITU-R BT.1702; Ofcom's guidance): more than five light-dark
+  pattern (also screen-wide: broad stripes of five or more pairs across the screen, counted along the stripes' own
+           direction, at the same 0.08): regular stripes are a separate trigger (ITU-R BT.1702; Ofcom's guidance): more than five light-dark
            pairs, clearly discernible, over a large share of the screen, worst when they move. A film made of
            gratings must keep their luminance contrast low. Here: in every frame, no more than 3 of the 16 screen
            tiles (so under 25% of the screen) hold a periodic component (2.5 or more pairs a tile, period 6 px or
            more at full HD) whose peak-to-trough relative luminance reaches 0.08 (a margin under the 0.1 that
            defines a flash pair).
+
+  Made for a film of gratings. On a picture (a skyline, a horizon, a desk) the broad test also fails where nothing
+  is striped: a picture's largest shapes, two or three light-dark bands from top to bottom, leak into the five-pair
+  bins through the analysis window. A cold-test agent's sunset over water read 0.19 there. Counting only spectral
+  peaks fixed that but missed a 0.1 grating drawn over the same frame, so it isn't used. Look at the frames the
+  broad test flags; the tile test is the one to trust on a picture.
 """
 import subprocess
 import sys
@@ -59,8 +66,10 @@ _wf = np.outer(np.hanning(H // 4), np.hanning(W // 4)).astype(np.float32)
 _ffy = np.fft.fftfreq(H // 4)[:, None] / 4          # cycles per half-HD pixel
 _ffx = np.fft.rfftfreq(W // 4)[None, :] / 4
 _ffr = np.sqrt(_ffx ** 2 + _ffy ** 2)
-# broad stripes across the whole screen: periods from the tiles' limit up to a fifth of the width (five pairs)
-_fband = (_ffr <= 2.5 / min(TILE_X, TILE_Y)) & (_ffr >= 5.0 / W)
+# broad stripes across the whole screen: periods from the tiles' limit up to five pairs across the screen, counted
+# along each component's own direction (the screen's extent projected on it: |fx| W + |fy| H). A radial floor of 5 / W
+# let in horizontal bands with under 3 pairs top to bottom, and read a landscape's sky, hills and water as a grating
+_fband = (_ffr <= 2.5 / min(TILE_X, TILE_Y)) & (np.abs(_ffx) * W + np.abs(_ffy) * H >= 5.0)
 
 
 def broad_contrast(Y):
@@ -146,6 +155,10 @@ def synth(kind, n=60):
             v = 0.15 + 0.02 * np.cos(2 * np.pi * (xx + 2 * k) / 6)
         elif kind == 'hi-fringes':        # broad stripes, 150 px period at half HD (six pairs across), 0.25 contrast
             v = 0.2 + 0.125 * np.cos(2 * np.pi * (xx * 0.9 + yy * 0.3 + 3 * k) / 150)
+        elif kind == 'layers':            # three broad horizontal bands, top to bottom, 0.3 contrast: a landscape
+            v = 0.2 + 0.15 * np.cos(2 * np.pi * (yy + k) / 180)
+        elif kind == 'hi-bars':           # horizontal bars, six pairs top to bottom, 0.2 contrast
+            v = 0.2 + 0.1 * np.cos(2 * np.pi * (yy + k) / 90)
         elif kind == 'line':              # one bright line on dark
             v = np.full((H, W), 0.02, np.float32)
             v[270 + int(20 * np.sin(k / 5)):274 + int(20 * np.sin(k / 5)), :] = 0.9
@@ -160,7 +173,7 @@ def synth(kind, n=60):
 
 if __name__ == '__main__':
     if '--selftest' in sys.argv:
-        expect = {'hi-grating': (True, False), 'hi-fringes': (True, False), 'lo-grating': (True, True), 'line': (True, True), 'strobe': (False, True)}
+        expect = {'hi-grating': (True, False), 'hi-fringes': (True, False), 'lo-grating': (True, True), 'layers': (True, True), 'hi-bars': (True, False), 'line': (True, True), 'strobe': (False, True)}
         ok = True
         for kind, (fl, pa) in expect.items():
             r = run(synth(kind), quiet=True)
