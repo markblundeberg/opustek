@@ -85,7 +85,8 @@ def run(wav='out/moire.wav'):
         res['lead in 7, drop 2'] = (ps[7] >= 0.5 and ps[7] > ps[8] + 0.15 and ps[7] == max(ps.values()),
                                     f'bars 107-118, pitch-class similarity at 7 16ths {ps[7]:.2f} (8: {ps[8]:.2f}, 4: {ps[4]:.2f}; v4 0.67 / 0.42)')
         try:
-            z = np.load(wav.replace('.wav', '_stems.npz'))
+            with np.load(wav.replace('.wav', '_stems.npz')) as f:     # each stem once: an npz unzips it on every lookup
+                z = {k: f[k] for k in f.files}
         except FileNotFoundError:
             z = None
         pw = lambda k, a, b: db(np.mean(((z[k + 'L'] + z[k + 'R'])[int(tb(a) * SR):int(tb(b) * SR)]) ** 2))

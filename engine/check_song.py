@@ -243,7 +243,8 @@ def crest(x, sr):
 def run(stem):
     sr, mix = wavfile.read(stem + '.wav')
     mix = mix.astype(np.float64)
-    st = np.load(stem + '_stems.npz')
+    with np.load(stem + '_stems.npz') as z:     # read each stem once: an npz unzips it again on every lookup
+        st = {k: z[k] for k in z.files}
     sc = json.load(open(stem + '_score.json'))
     kp = np.concatenate([mix[int(tb(b) * sr):int((tb(b) + BAR) * sr)] for b in S.KICK])
     c = crest(kp, sr)

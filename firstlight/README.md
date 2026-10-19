@@ -16,8 +16,8 @@ It started as a one-minute study in the style of a synthwave album (*Low Orbit*,
 when the listener suggested composing something original with those instruments. Every instrument is built from the
 kernel.
 
-    python3 firstlight/firstlight.py && python3 firstlight/check_firstlight.py      # about 3 min and 7 GB
-    python3 firstlight/check_firstlight.py --selftest     # eighteen faults, each tripping its check (about 40 min)
+    python3 firstlight/firstlight.py && python3 firstlight/check_firstlight.py      # about 50 s and 7 GB
+    python3 firstlight/check_firstlight.py --selftest     # eighteen faults, each tripping its check (10 min, 2 at a time)
     python3 firstlight/firstlight.py --form study1        # the studies it grew from (below): study1, study4
 
 ## The piece

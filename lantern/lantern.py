@@ -25,6 +25,7 @@ from scipy.io import wavfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [ROOT]
 import dsp  # the kernel only
+import kit  # smooth()
 
 SR = 48000
 BPM = 90.0
@@ -356,7 +357,7 @@ def render(brk=None):
     tune_on = np.zeros(N)
     for b0, b1 in ((5, 13), (17, 21)):
         tune_on[int(tb(b0) * SR):int(tb(b1) * SR)] = 1
-    tune_on = np.convolve(tune_on, np.ones(int(0.3 * SR)) / int(0.3 * SR), mode='same')
+    tune_on = kit.smooth(tune_on, int(0.3 * SR))
     ep = ep - 0.5 * band * tune_on
     ep = dsp.ladder(ep, fc, SR, res=0.1, drive=0.8)
     trem = 0.5 + 0.5 * np.sin(2 * np.pi * (BPM / 60 / 2) * t)                # autopan at a half-note rate
@@ -420,6 +421,6 @@ if __name__ == '__main__':
     os.makedirs('out', exist_ok=True)
     mix, stems, score = render(a.brk)
     wavfile.write(f'out/{name}.wav', SR, mix.astype(np.float32))
-    np.savez_compressed(f'out/{name}_stems.npz', sr=SR, **stems)
+    np.savez(f'out/{name}_stems.npz', sr=SR, **stems)
     json.dump(score, open(f'out/{name}_score.json', 'w'))
     print(f'wrote out/{name}.wav: {len(mix) / SR:.1f} s, {dsp.lufs(mix, SR):.1f} LUFS, {dsp.true_peak_db(mix):.1f} dBTP')

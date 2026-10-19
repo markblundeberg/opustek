@@ -10,12 +10,13 @@ Orbit's rounds established with the listener: the balance, a kick that "hits fin
 Orbit's 1.44 notes a beat ("too much bass funk"), a middle that moves, drums that change from bar to bar.
 
   python3 firstlight/check_firstlight.py              checks out/firstlight.wav (+ stems and score), the full piece
-  python3 firstlight/check_firstlight.py --selftest   each fault against its check
+  python3 firstlight/check_firstlight.py --selftest   each fault against its check, several at once (--jobs N to set
+                                                      how many; --keep keeps the broken renders)
   (--form study1 or study4: the studies, out/firstlight_study1.wav, ...)
 """
+import functools
 import json
 import os
-import subprocess
 import sys
 
 import numpy as np
@@ -27,6 +28,7 @@ sys.path[:0] = [ROOT, os.path.join(ROOT, 'tools'), HERE]
 from measures import (load, mono, db, Grid, kick_punch, band_share, phone_share, loudest_second, ending_steps,
                       loudness, onsets, masking, side_ratio, crest, bed_fill, repetition, syncopation)
 import firstlight as P
+import kit
 
 FAULTS_STUDY4 = {'sharp-lead': 'tuning', 'wrong-note': 'key', 'fragment-altered': 'hook integrity', 'buried-lead': 'lead audible',
                  'busy-bass': 'bass density', 'no-sequence': 'mid motion', 'static-drums': 'drum variety',
@@ -224,7 +226,7 @@ def run(path=f'out/{P.NAME}.wav', quiet=False):
     sr, x = load(path)
     base = path[:-4]
     sc = json.load(open(base + '_score.json'))
-    st = np.load(base + '_stems.npz')
+    st = kit.load_stems(base + '_stems.npz')
     g = Grid(sc['bpm'], 0.0)
     y = mono(x)
     sec = sc['sections']
@@ -419,22 +421,11 @@ if __name__ == '__main__':
     form = sys.argv[sys.argv.index('--form') + 1] if '--form' in sys.argv else 'full'
     tag = '' if form == 'full' else f'_{form}'
     if '--selftest' in sys.argv:
-        ok = True
-        clean = run(f'out/{P.NAME}{tag}.wav', quiet=True)
-        bad = [k for k, (p, _) in clean.items() if not p]
-        print('  clean render:', 'all checks pass' if not bad else f'FAILING {bad}')
-        ok &= not bad
-        for brk, check in FAULTS[form].items():
-            r = subprocess.run([sys.executable, os.path.join(HERE, 'firstlight.py'), '--break', brk, '--form', form], stdout=subprocess.DEVNULL)
-            if r.returncode:
-                print(f'  BAD {brk}: the broken render failed to run'); ok = False; continue
-            r = run(f'out/{P.NAME}{tag}_BROKEN-{brk}.wav', quiet=True)
-            caught = not r[check][0]
-            others = [k for k, (p, _) in r.items() if not p and k != check]
-            ok &= caught
-            print(f"  {'ok ' if caught else 'BAD'} {brk}: '{check}' {'FAILS' if caught else 'passes'} ({r[check][1]})"
-                  + (f'; also failing: {", ".join(others)}' if others else ''))
-        print('  ->', 'each fault trips its check' if ok else 'a check is blind (or the clean render fails)')
+        jobs = int(sys.argv[sys.argv.index('--jobs') + 1]) if '--jobs' in sys.argv else None
+        ok = kit.selftest(FAULTS[form],
+                          lambda brk: [sys.executable, os.path.join(HERE, 'firstlight.py'), '--break', brk, '--form', form],
+                          lambda brk: f'out/{P.NAME}{tag}_BROKEN-{brk}.wav', functools.partial(run, quiet=True),
+                          f'out/{P.NAME}{tag}.wav', mem_gb=7.5, jobs=jobs, keep='--keep' in sys.argv)
         sys.exit(0 if ok else 1)
-    args = [a for a in sys.argv[1:] if not a.startswith('--') and a != form]
+    args = [a for a in sys.argv[1:] if not a.startswith('--') and a != form and not a.isdigit()]
     sys.exit(0 if all(p for p, _ in run(args[0] if args else f'out/{P.NAME}{tag}.wav').values()) else 1)

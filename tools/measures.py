@@ -176,12 +176,17 @@ def onsets(stem, sr, grid, b0, b1, rise_db=6.0, floor_db=-50.0, win=0.03, swing=
     the render's own note list (that check would pass a missing part). Pass the piece's swing, or swung odd steps
     are looked for in the wrong place."""
     y = mono(stem)
-    bands = [(125 * 2 ** k, 250 * 2 ** k) for k in range(6)]
-    E = [_bandpass(y, sr, lo, hi) ** 2 for lo, hi in bands]
     steps = [grid.ts(b0, k, swing) for k in range((b1 - b0) * 16)]
     w = int(win * sr)
-    post = np.array([[e[int(t * sr):int(t * sr) + w].mean() for e in E] for t in steps])
-    pre = np.array([[e[max(0, int(t * sr) - w):int(t * sr)].mean() if int(t * sr) > 0 else 1e-20 for e in E] for t in steps])
+    # filter only the bars asked for, with a second's run-in for the filters to settle (a whole song, six bands,
+    # fifty calls took most of a check's time)
+    c0 = max(0, int((steps[0] - 1.0) * sr)) if steps else 0
+    y = y[c0:int((grid.tb(b1) + 1.0) * sr) + w]
+    ii = [int(t * sr) - c0 for t in steps]
+    bands = [(125 * 2 ** k, 250 * 2 ** k) for k in range(6)]
+    E = [_bandpass(y, sr, lo, hi) ** 2 for lo, hi in bands]
+    post = np.array([[e[i:i + w].mean() for e in E] for i in ii])
+    pre = np.array([[e[max(0, i - w):i].mean() if i + c0 > 0 else 1e-20 for e in E] for i in ii])
     top = db(post.max())
     loud = db(post) > top + floor_db
     return ((db(post) - db(pre + 1e-20) >= rise_db) & loud).any(1)

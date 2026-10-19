@@ -2,11 +2,11 @@
 at a time, lantern.BREAKS) and shows the matching check fail.
 
   python3 lantern/check_lantern.py              checks out/lantern.wav (+ stems and score)
-  python3 lantern/check_lantern.py --selftest   each fault against its check
+  python3 lantern/check_lantern.py --selftest   each fault against its check, several at once (--jobs N, --keep)
 """
+import functools
 import json
 import os
-import subprocess
 import sys
 
 import numpy as np
@@ -17,7 +17,9 @@ ROOT = os.path.dirname(HERE)
 sys.path[:0] = [ROOT, os.path.join(ROOT, 'tools'), HERE]
 from measures import load, mono, db, Grid, kick_punch, band_share, phone_share, loudest_second, ending_steps, loudness
 import lantern as P
+import kit
 
+MEM_GB = 2.5   # one broken render's peak memory (1.4 GB) plus its check's
 FAULT_TRIPS = {'sharp-kalimba': 'tuning', 'wrong-note': 'key', 'kick-in-break': 'break',
                'buried-tune': 'tune audible', 'boom-at-end': 'ending'}
 
@@ -48,7 +50,7 @@ def run(path='out/lantern.wav', quiet=False):
     sr, x = load(path)
     base = path[:-4]
     sc = json.load(open(base + '_score.json'))
-    st = np.load(base + '_stems.npz')
+    st = kit.load_stems(base + '_stems.npz')
     g = Grid(sc['bpm'], 0.0)
     y = mono(x)
     res = {}
@@ -102,21 +104,10 @@ def run(path='out/lantern.wav', quiet=False):
 
 if __name__ == '__main__':
     if '--selftest' in sys.argv:
-        ok = True
-        clean = run('out/lantern.wav', quiet=True)
-        bad = [k for k, (p, _) in clean.items() if not p]
-        print('  clean render:', 'all checks pass' if not bad else f'FAILING {bad}')
-        ok &= not bad
-        for brk, check in FAULT_TRIPS.items():
-            r = subprocess.run([sys.executable, os.path.join(HERE, 'lantern.py'), '--break', brk], stdout=subprocess.DEVNULL)
-            if r.returncode:
-                print(f'  BAD {brk}: the broken render failed to run'); ok = False; continue
-            r = run(f'out/lantern_BROKEN-{brk}.wav', quiet=True)
-            caught = not r[check][0]
-            others = [k for k, (p, _) in r.items() if not p and k != check]
-            ok &= caught
-            print(f"  {'ok ' if caught else 'BAD'} {brk}: '{check}' {'FAILS' if caught else 'passes'} ({r[check][1]})"
-                  + (f'; also failing: {", ".join(others)}' if others else ''))
-        print('  ->', 'each fault trips its check' if ok else 'a check is blind (or the clean render fails)')
+        jobs = int(sys.argv[sys.argv.index('--jobs') + 1]) if '--jobs' in sys.argv else None
+        ok = kit.selftest(FAULT_TRIPS, lambda brk: [sys.executable, os.path.join(HERE, 'lantern.py'), '--break', brk],
+                          lambda brk: f'out/lantern_BROKEN-{brk}.wav', functools.partial(run, quiet=True),
+                          'out/lantern.wav', mem_gb=MEM_GB, jobs=jobs, keep='--keep' in sys.argv)
         sys.exit(0 if ok else 1)
-    sys.exit(0 if all(p for p, _ in run(sys.argv[1] if len(sys.argv) > 1 else 'out/lantern.wav').values()) else 1)
+    args = [a for a in sys.argv[1:] if not a.startswith('--') and not a.isdigit()]
+    sys.exit(0 if all(p for p, _ in run(args[0] if args else 'out/lantern.wav').values()) else 1)

@@ -42,11 +42,11 @@ gave you no seed, send a 30-60 s study of one idea and ask, rather than guessing
 
 From the repository root (outputs go to `out/`, which git ignores):
 
-    pip install -r requirements.txt                      # numpy, scipy, pycairo, Pillow; plus gcc and ffmpeg on the system
+    pip install -r requirements.txt                      # numpy, scipy, pycairo, Pillow, matplotlib; plus gcc and ffmpeg
     python3 template/study.py && python3 template/check_study.py      # 10 s, 1.6 GB; then --selftest
     python3 engine/song.py && python3 engine/check_song.py            # 45 s, about 5 GB of memory
     python3 moire/moire.py && python3 moire/check_moire.py            # 2 min, about 14 GB of memory
-    python3 firstlight/firstlight.py && python3 firstlight/check_firstlight.py   # 3 min, about 7 GB
+    python3 firstlight/firstlight.py && python3 firstlight/check_firstlight.py   # 50 s, about 7 GB; --selftest 10 min
     python3 firstlight/film.py --height 540 --jobs 5   # its film, a quick cut; the 1080p release took 5.5 h (see its README)
     python3 tools/measures.py selftest
     python3 tools/originality.py selftest                             # after engine/song.py

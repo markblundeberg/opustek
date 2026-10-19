@@ -537,7 +537,7 @@ def lead_voice(N, ev, cents=0.0, tone='pulse'):
         vib[i:i + n] = np.maximum(vib[i:i + n], v)
         on[i:i + int(e['dur'] * SR)] = True
     w = int(0.06 * SR)                    # a fixed-time glide: a 60 ms ramp in log frequency, whatever the leap
-    logf = np.convolve(np.concatenate([np.full(w, target[0]), target]), np.ones(w) / w, mode='valid')[1:N + 1]
+    logf = signal.oaconvolve(np.concatenate([np.full(w, target[0]), target]), np.ones(w) / w, mode='valid')[1:N + 1]
     f = np.exp(logf) * 2 ** (14 * vib * np.sin(2 * np.pi * 5.3 * t) / 1200)
     ph = np.cumsum(f) / SR
     if tone == 'breath':     # a sine with a little 2nd and 3rd, and breath: noise around the note, rising with it
@@ -1031,7 +1031,7 @@ def render(brk=None, voice='pluck', soft=True, bass_tone='round', F=STUDY1, drum
     on = np.zeros(N)
     for e in lev_ + cev + dev:
         on[int(e['t'] * SR):int((e['t'] + e['dur'] + 0.2) * SR)] = 1
-    on = np.convolve(on, np.ones(int(0.25 * SR)) / int(0.25 * SR), mode='same')
+    on = kit.smooth(on, int(0.25 * SR))
     pL, pR = bandsplit_dip(pL, on, 500, 1800, 0.55), bandsplit_dip(pR, on, 500, 1800, 0.55)
 
     # mix

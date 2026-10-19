@@ -3,11 +3,12 @@ the study broken on purpose (one fault at a time) and shows the matching check f
 you write gets a fault that should trip it, and a check that never fails hasn't been shown to work.
 
   python3 template/check_study.py              checks out/study.wav (+ stems and score)
-  python3 template/check_study.py --selftest   each fault in study.BREAKS against its check
+  python3 template/check_study.py --selftest   each fault in study.BREAKS against its check, several at once
+                                               (--jobs N to set how many; --keep keeps the broken renders)
 """
+import functools
 import json
 import os
-import subprocess
 import sys
 
 import numpy as np
@@ -17,10 +18,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [ROOT, os.path.join(ROOT, 'tools')]
 from measures import load, mono, db, Grid, kick_punch, band_share, phone_share, bed_fill, repetition, loudness
+import kit
 
 FAULT_TRIPS = {'kick-in-take-away': 'take-away', 'sub-fills-gaps': 'kick punch'}
 # A fault may trip other checks too (the held sub also fills the take-away's low end and darkens the tone); what the
 # self-test asks is that each fault trips the check written for it.
+MEM_GB = 2.5   # one broken render's peak memory plus its check's: sets how many the self-test runs at once
 
 
 def run(path='out/study.wav', quiet=False):
@@ -54,15 +57,12 @@ def run(path='out/study.wav', quiet=False):
 
 if __name__ == '__main__':
     if '--selftest' in sys.argv:
-        ok = True
-        for brk, check in FAULT_TRIPS.items():
-            subprocess.run([sys.executable, os.path.join(HERE, 'study.py'), '--break', brk], check=True, stdout=subprocess.DEVNULL)
-            r = run(f'out/study_BROKEN-{brk}.wav', quiet=True)
-            caught = not r[check][0]
-            others = [k for k, (p, _) in r.items() if not p and k != check]
-            ok &= caught
-            print(f"  {'ok ' if caught else 'BAD'} {brk}: '{check}' {'FAILS' if caught else 'passes'} ({r[check][1]})"
-                  + (f'; also failing: {", ".join(others)}' if others else ''))
-        print('  ->', 'each fault trips its check' if ok else 'a check is blind')
+        # Each fault renders in its own process, as many at once as memory allows, and its files are deleted once
+        # checked. When renders get slow, see WORKFLOW.md ("Keep the self-test fast").
+        jobs = int(sys.argv[sys.argv.index('--jobs') + 1]) if '--jobs' in sys.argv else None
+        ok = kit.selftest(FAULT_TRIPS, lambda brk: [sys.executable, os.path.join(HERE, 'study.py'), '--break', brk],
+                          lambda brk: f'out/study_BROKEN-{brk}.wav', functools.partial(run, quiet=True),
+                          'out/study.wav', mem_gb=MEM_GB, jobs=jobs, keep='--keep' in sys.argv)
         sys.exit(0 if ok else 1)
-    run(sys.argv[1] if len(sys.argv) > 1 else 'out/study.wav')
+    args = [a for a in sys.argv[1:] if not a.startswith('--') and not a.isdigit()]
+    sys.exit(0 if all(p for p, _ in run(args[0] if args else 'out/study.wav').values()) else 1)
