@@ -93,3 +93,92 @@ theme. "A good enough study. I think ready to make the full song."
 - The top-end check's floor moved from the synthwave album's -25 dB to -28: the voices the listener chose are darker.
 - Refactors were proven by bit-identical renders: studies 1 and 4 still render bit for bit from the code that renders
   the full piece.
+
+## The film
+
+One unbroken shot, 3:24: a room with one window at dawn, the camera drifting slowly back from the glass. Everything
+that moves in it is read from the score, one sound to one visible thing:
+
+- a red light on a radio mast blinks the hook's rhythm (two short, one long) in every bar, from bar 1;
+- each fragment of the hook lights a piece of the city: windows whose heights draw its notes, the crane, the lamps;
+- the drums are the wind: with none (the intro, the breakdown) the water goes still and mirrors the city;
+- the sun's rim clears the hills on the hook's top note (1:27), and the cat lifts its head;
+- the counter-line is a ferry crossing, the bongos are wingbeats, the descant is a plane drawing its contour as a
+  contrail;
+- in the bridge, the string's answers flare the sun's light off the water onto the wall;
+- the outro turns the city's lights off in the reverse order they came on, and the room's lamp, on from the first
+  frame, goes off last, on the final note.
+
+The room is ray cast, so the sun through the window lands only where it can. The cat is made of blended
+signed-distance shapes. Everything is numpy, with no image or video models, and ffmpeg encodes it.
+
+    python3 firstlight/firstlight.py                     # the music first: the film muxes out/firstlight.wav
+    python3 firstlight/film.py --height 540 --jobs 5     # a quick cut at 960x540 -> out/firstlight_film_540.mp4
+    python3 firstlight/film.py --jobs 5                  # the release, 1920x1080 -> out/firstlight_film.mp4
+    python3 firstlight/film.py --still 87 130            # single frames -> out/firstlight_film_87.png, ...
+    python3 firstlight/film.py --span 100 140            # only those seconds
+    python3 firstlight/check_film.py out/firstlight_film.mp4      # its checks (below)
+    python3 firstlight/check_film.py --selftest out/firstlight_film.mp4   # each check, broken once, must fail
+    python3 firstlight/time_film.py --height 1080 87     # one frame's time and memory, before a long render
+
+It is slow, because every pixel is ray cast on the CPU. The 1080p release (6112 frames) took 5 h 38 min on a 6-core
+Ryzen 5 7600X at `--jobs 5`, about 3.3 s per frame per worker. Each worker holds about 2.1 GB, and its ffmpeg encoder
+another 0.4 GB, so `--jobs 5` peaked at about 14 GB. Cap it, because an uncapped render that runs out of memory can
+take the whole machine down:
+
+    systemd-run --user --scope -p MemoryMax=17G -p MemorySwapMax=0 nice -n 19 python3 firstlight/film.py --jobs 5
+
+A first try at `--jobs 6` under a 15 GB cap was stopped by the cap after 27 minutes: the encoders' memory hadn't
+been counted.
+
+The files:
+
+| file | what |
+|---|---|
+| `film.py` | the score-to-picture map, the view outside, the camera, the render and encode |
+| `room.py` | the room: one window, one sun, ray cast |
+| `cat.py` | the cat: asleep on the window seat, curled, breathing; it lifts its head once |
+| `props.py` | the mug, the plant, the lamp, the headphones and the paperback |
+| `materials.py` | the surfaces: walls, ceiling, floor, the window's paint, the seat's cushion, the wood |
+| `city.py` | the city across the water: buildings, their windows, the rows behind in the haze |
+| `prims.py`, `shapes.py`, `ids.py` | ray-primitive intersections, 2D masks, material ids |
+| `check_film.py` | the film's checks |
+| `time_film.py` | time and memory for single frames |
+
+### The film's checks
+
+`check_film.py` runs three checks on the code and five on the encoded film. Its self-test breaks each one once
+and must see it fail, including the whole film read against a score 3 frames late.
+
+- **patch**: the sun's patches on the wall and the cushion, worked out forward as polygons, agree with the film's
+  own backward test.
+- **sun**: the room is lit from where the sun is drawn, within 1.5 px, in the code and in the encoded frames.
+- **outro**: every outro note turns off at least one light the camera can see.
+- **mast**: the mast light, frame by frame, correlates with the hook's rhythm (at least 0.9, at a lag of 0 frames).
+- **lights**: each of the 45 window lights brightens within 1 frame of its note.
+- **glitter**: the glitter on the water falls straight below the sun (within 4 px).
+- **jumps**: no one-frame jump the score doesn't put there.
+
+For photosensitivity, run the kit's `moire/film/check_safety.py` on the encoded film (flashes, and regular stripes
+in 16 tiles, after ITU-R BT.1702). The release has no flashes, and no frame with stripes in more than 3 of the 16
+tiles. Its "pattern" line still prints FAIL, from the broad-stripe test, which reads a layered landscape (sky,
+hills, city, water) as bands across the screen. As that checker's docstring says, trust the tile test on a picture.
+The stripe tiles were the binding constraint on the film: the window paint's texture, the reveal's sky light and the
+direct sun's strength were each set by them.
+
+### How the film got here
+
+Mark asked what a film for the piece would be. The pitch was one shot of a window at dawn, easy to leave on, with
+every event read from the score. A quick mockup in flat shapes drew four notes: the ferry "speeds up and slows
+down" (it moved only on its notes; now it crosses at a steady speed and its lights carry them); white-noise
+sparkle on the water was "too basic" (now glints where a ripple's slope sends the sun to the camera); the contrail
+should fade (it does now); and the sunlight on the indoor wall didn't "make sense geometrically". That last note
+made the room a ray-cast one, with the camera pulling back from the window and the cat asleep beneath it.
+
+A helper agent sculpted the cat. Mark: "holy smokes that cat looks good", then "You know what the problem is now
+though right?" The cat outclassed the room, so three more helpers brought up the props, the surfaces and the city,
+each behind its own interface in its own file. A fresh agent with an open brief then reviewed the film. Its notes
+gave the flock at the second drop, glints that stop where the water mirrors land, the lamp going off on the final
+note, and the cat in the night glass; its one wrong claim (lights still on at 3:20) was checked against the frames
+and dropped. Mark's last note, that the light off the water showed on the wall only "briefly at 2:22", made it
+stay there whenever the sun is up and the water moves. Mark on the release: "no notes".

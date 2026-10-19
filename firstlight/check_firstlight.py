@@ -237,7 +237,8 @@ def run(path=f'out/{P.NAME}.wav', quiet=False):
     res = {}
 
     L, tp = loudness(x, sr)
-    res['loudness'] = (abs(L + 11.0) <= 0.7 and tp <= -1.0, f'{L:.1f} LUFS (-11 +- 0.7), true peak {tp:.1f} dBTP (<= -1)')
+    T = sc.get('lufs', -11.0)                  # the master's own target (the sound A/B tried -14)
+    res['loudness'] = (abs(L - T) <= 0.7 and tp <= -1.0, f'{L:.1f} LUFS ({T:g} +- 0.7), true peak {tp:.1f} dBTP (<= -1)')
 
     errs = [note_cents(st['lead_raw'], sr, e['t'], HZ(e['midi'])) for e in sc['lead'] if e['dur'] >= 0.35]
     errs = np.array([e for e in errs if e is not None])

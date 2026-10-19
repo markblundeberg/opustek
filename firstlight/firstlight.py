@@ -13,6 +13,8 @@ dsp.py) and numpy.
   python3 firstlight/firstlight.py                -> out/firstlight.wav, _stems.npz, _score.json (about 2 min, 7 GB)
   python3 firstlight/firstlight.py --break NAME   the same with one fault (see BREAKS), for the self-test
   python3 firstlight/firstlight.py --form study1|study4   the studies, -> out/firstlight_study1.wav, ...
+  python3 firstlight/firstlight.py --lead felt --drums brush --space dark --tape light --lufs -14
+                                                  the sound's alternatives (the score unchanged), -> a wav named for them
 
 The full form (88 bars):
   1-8    intro: the pad on Dbmaj9 and Fm9, the sequence alone, the bass rising in; the hook's first bar, twice
@@ -113,9 +115,11 @@ BONGO = [[(3, 1), (6, 0), (10, 1), (14, 0)],
 LEAD_VOICES = {'pulse': "study 1's lead, Low Orbit's pulse: a resonant ladder struck on each note (heard as 'too piercing')",
                'epiano': 'a tine electric piano: two-operator FM, its index falling from a bark to a soft core',
                'pluck': 'a soft plucked string: Karplus-Strong from a dark noise burst, fully averaged, ringing out',
-               'breath': 'a breathy, flute-like voice: a sine with a little 2nd and 3rd, breath noise, a slow attack'}
+               'breath': 'a breathy, flute-like voice: a sine with a little 2nd and 3rd, breath noise, a slow attack',
+               'felt': 'a felt piano: the stretched partials of two strings a cent apart, a soft felt hammer, a damper'}
 LEAD_LUFS = -9.2                           # every voice matched to the pulse lead's own loudness (BS.1770, dry)
 LEAD_TRIM = {'pluck': -2.0}                # then the string, chosen in study 2, 2 dB down: "a bit too hard or loud"
+LEAD_TRIM.update(felt=-2.0, epiano=-2.0)   # (the sound A/B: the other struck voices at the string's own level)
 COUNTER_TRIM = -4.0                        # the counter-line (the breath voice) sits this far under the lead's loudness
 DESCANT_TRIM = -5.0                        # the descant (the breath again, above the hook), further under
 BASS_VOICES = {'layered': "Low Orbit's: a ducked sine sub, two saws through a struck resonant ladder, grit on the accents",
@@ -124,7 +128,15 @@ BASS_VOICES = {'layered': "Low Orbit's: a ducked sine sub, two saws through a st
 BASS_LUFS = -16.7                          # every bass matched to the layered one's loudness (body and sub at their gains)
 BASS_TRIM = {'round': -0.7}                # then the round one, chosen in study 3 ("'round' actually works"), a touch down
                                            # so the kick keeps its punch (its weight sits where the kick is)
+# the sound A/B (the score unchanged): the alternatives to each part of the sound, the first of each the piece's own
+DRUM_KITS = {'soft': 'the soft kit: the punchy kick, the 80s snare dry, without its gated room',
+             'brush': 'the punchy kick and a brushed snare: a slap of grainy noise, a little head, the bristles settling',
+             'brush-round': 'the brushed snare and a rounder kick: a lower, slower sweep, no click, a longer body'}
+SPACES = {'room': (3.8, 4000, 0.5), 'dark': (4.8, 2400, 0.6), 'close': (2.6, 3800, 0.38)}  # (rt60, damping Hz, return)
+TAPES = {'none': None,                     # (wow %, flutter %, drive, low-pass Hz, head bump dB, hiss dBFS)
+         'light': (0.08, 0.03, 0.5, 14000, 1.0, -68), 'medium': (0.2, 0.05, 0.9, 10000, 1.5, -61)}
 KICK_GAIN, LUFS_TARGET = 1.0, -11.0           # 0.5 dB under Low Orbit: the held bass costs the kick some punch
+BRUSH_GAIN = 1.56                          # the brushed snare matched to the dry snare's loudness (BS.1770, 8 hits)
 CLIP = 0.6                                 # the drum bus clips above this fraction of the kick's peak
 
 BREAKS = {
@@ -556,7 +568,7 @@ def note_voice(N, ev, tone, rng, cents=0.0):
     for e in ev:
         f = HZ(e['midi']) * 2 ** ((cents + rng.uniform(-2, 2)) / 1200)
         i = int(e['t'] * SR)
-        n = min(N - i, int((e['dur'] + (0.6 if tone == 'epiano' else 0.9)) * SR))
+        n = min(N - i, int((e['dur'] + {'epiano': 0.6, 'felt': 0.5}.get(tone, 0.9)) * SR))
         t = np.arange(n) / SR
         v = e['vel'] * rng.uniform(0.9, 1.0)
         if tone == 'epiano':
@@ -566,6 +578,8 @@ def note_voice(N, ev, tone, rng, cents=0.0):
             ph = 2 * np.pi * f * t
             y = np.sin(ph + idx * np.sin(ph)) + 0.08 * v * np.sin(2 * np.pi * min(f * 14.0, 15000) * t) * np.exp(-t / 0.015)
             y *= amp
+        elif tone == 'felt':
+            y = felt_note(f, v, e['dur'], t, rng)
         else:
             m = int(0.014 * SR)                        # a thumb, not a pick ("a bit too hard")
             exc = np.zeros(n)
@@ -575,6 +589,85 @@ def note_voice(N, ev, tone, rng, cents=0.0):
             y *= np.minimum(1, t / 0.008)              # and the first 8 ms eased in
         out[i:i + n] += v * end_fade(y)
     return out
+
+
+FELT_B = 4e-4                              # the string's stiffness: partial k sits at k f sqrt(1 + B k^2)
+
+
+def felt_note(f, v, dur, t, rng):
+    """One felt-piano note: two strings a cent or so apart (so held notes beat a little), each with the stretched
+    partials of a stiff string; the felt hammer leaves few upper partials (fewer when soft), and each partial dies
+    faster the higher it is, quickly at first, then slowly; a short thump of the felt on the string; the damper
+    falls 50 ms after the note ends."""
+    y = np.zeros(len(t))
+    tau1 = 1.6 * (440 / f) ** 0.4
+    for k in range(1, 13):
+        fk = k * f * np.sqrt(1 + FELT_B * k * k)
+        if fk > 12000:
+            break
+        a = np.exp(-(k - 1) / (1.2 + 2.5 * v)) / k
+        tk = tau1 / (1 + 0.35 * (k - 1))
+        env = 0.6 * np.exp(-t / (0.3 * tk)) + 0.4 * np.exp(-t / (1.5 * tk))
+        for c in (-0.6, 0.6):
+            fs = fk * 2 ** (c * rng.uniform(0.5, 1.2) / 1200)
+            y += a * env * np.sin(2 * np.pi * fs * t + rng.uniform(0, 2 * np.pi))
+    m = int(0.03 * SR)
+    th = np.zeros(len(t))
+    th[:m] = dsp.butter(rng.standard_normal(m), 1000, SR, 'low', 2)[:m] * np.exp(-t[:m] / 0.008)
+    y = y + 0.15 * v * th
+    y *= np.minimum(1, t / 0.002) * np.exp(-np.clip(t - dur - 0.05, 0, None) / 0.08)
+    return y
+
+
+def brush_hit(rng, vel=1.0):
+    """A brushed snare: a slap of grainy noise (the bristles, noise under a fast-flickering envelope), band-passed,
+    a little of the head's tone, then the bristles settling for a quarter of a second. Returns (L, R), each side its
+    own bristles in part, as wide as a snare in a room."""
+    n = int(0.4 * SR)
+    t = np.arange(n) / SR
+    grain = 0.55 + 0.45 * np.abs(dsp.butter(rng.standard_normal(n), 700, SR, 'low', 2)) / 0.35
+    env = np.minimum(1, t / 0.003) * (np.exp(-t / 0.07) + 0.18 * np.exp(-t / 0.25))
+    head = 0.3 * np.sin(2 * np.pi * np.cumsum(190 + 25 * np.exp(-t / 0.01)) / SR) * np.exp(-t / 0.035)
+    common = rng.standard_normal(n)
+    out = []
+    for _ in range(2):
+        nz = 0.7 * common + 0.3 * rng.standard_normal(n)
+        y = dsp.butter(dsp.butter(nz * grain, 900, SR, 'high', 2), 8000, SR, 'low', 2) * env
+        out.append(vel * end_fade(0.9 * y + head * np.minimum(1, t / 0.001), 0.05))
+    return out[0], out[1]
+
+
+def round_kick(rng):
+    """A rounder kick: a sine from 150 Hz down to 46 Hz, slower than the punchy one's sweep, no click, its body a
+    little longer (still gone by 0.36 s), saturated less."""
+    n = int(0.45 * SR)
+    t = np.arange(n) / SR
+    f = 46 + 104 * np.exp(-t / 0.035)
+    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / 0.11) * np.minimum(1, t / 0.0015)
+    y = np.tanh(1.3 * body) / np.tanh(1.3)
+    y *= np.clip((0.36 - t) / 0.14, 0, 1)
+    return dsp.butter(y, 5000, SR, 'low')
+
+
+def tape(mix, spec, rng):
+    """The mix through a tape machine, before the master: wow and flutter (the mix read around its own time, so
+    nothing moves on average), a soft saturation set against the mix's own peaks, a head bump in the lows, the top
+    rolled off. Returns the mix and the hiss to add after the master (dBFS RMS)."""
+    wow, flutter, drive, lp, bump, hiss = spec
+    t = np.arange(len(mix)) / SR
+    drift = dsp.butter(rng.standard_normal(len(t) // 480 + 2), 0.02, 100, 'low', 2)
+    drift = np.interp(t, np.arange(len(drift)) / 100, drift / (np.std(drift) + 1e-12))
+    # a delay d(t) shifts pitch by -d'(t): A sin(w t) gives a peak deviation of A w
+    dev = (wow / 100 / (2 * np.pi * 0.55) * (0.8 * np.sin(2 * np.pi * 0.55 * t + rng.uniform(0, 6.3)) + 0.2 * drift)
+           + flutter / 100 / (2 * np.pi * 6.5) * np.sin(2 * np.pi * 6.5 * t + rng.uniform(0, 6.3)))
+    out = np.stack([np.interp(t + dev, t, mix[:, c]) for c in range(2)], 1)
+    ref = np.percentile(np.abs(out), 99.9)
+    out = np.tanh(drive * out / ref) / drive * ref
+    for c in range(2):
+        x = out[:, c]
+        x = x + (10 ** (bump / 20) - 1) * signal.sosfiltfilt(signal.butter(1, [45, 110], 'band', fs=SR, output='sos'), x)
+        out[:, c] = dsp.butter(x, lp, SR, 'low', 2)
+    return out, hiss
 
 
 def bass_struck(N, notes, tone, rng):
@@ -708,8 +801,10 @@ def bass_line(N, brk=None, tone='layered', F=STUDY1):
 
 # --- the render ---------------------------------------------------------------------------------------------------
 
-def render(brk=None, voice='pluck', soft=True, bass_tone='round', F=STUDY1):
+def render(brk=None, voice='pluck', soft=True, bass_tone='round', F=STUDY1, drums='soft', space='room', tape_='none',
+           lufs=LUFS_TARGET):
     rng = np.random.default_rng(31)
+    brng = np.random.default_rng(41)       # the A/B's own drums: the main stream is drawn from exactly as without them
     NB = F.nbars
     dur = NB * BAR + TAIL
     N = int(dur * SR)
@@ -730,10 +825,15 @@ def render(brk=None, voice='pluck', soft=True, bass_tone='round', F=STUDY1):
     if brk == 'boom-at-end':
         kicks.append(tb(NB) + 3.5)
     K = np.zeros(N)
-    kit.place(K, kick_hit(rng), [(k, vary(0.94, 1.0)) for k in kicks], SR, KICK_GAIN)
+    kh = kick_hit(rng)
+    kh = round_kick(brng) if drums == 'brush-round' else kh
+    kit.place(K, kh, [(k, vary(0.94, 1.0)) for k in kicks], SR, KICK_GAIN)
 
     snL, snR = np.zeros(N), np.zeros(N)
     takes = [snare_hit(rng, gated=not soft) for _ in range(1 if static else 3)]     # soft: dry, no gated room
+    brush = drums.startswith('brush')
+    if brush:
+        takes = [tuple(BRUSH_GAIN * x for x in brush_hit(brng)) for _ in takes]
     snares = []
     for i_, (b, q) in enumerate((b, q) for b in sorted(snare_pat) for q in snare_pat[b]):
         snares.append(tb(b, q))
@@ -747,6 +847,8 @@ def render(brk=None, voice='pluck', soft=True, bass_tone='round', F=STUDY1):
     for b, qs, vs in F.fills + [(b, [q], [v]) for b, q, v in ghosts]:
         for q, v in zip(qs, vs):
             dL, dR = snare_hit(rng, v, gated=(b not in F.rolls and v > 0.3))
+            if brush:
+                dL, dR = (BRUSH_GAIN * x for x in brush_hit(brng, v))
             kit.place(snL, dL, [(tb(b, q), 1.0)], SR)
             kit.place(snR, dR, [(tb(b, q), 1.0)], SR)
 
@@ -956,10 +1058,11 @@ def render(brk=None, voice='pluck', soft=True, bass_tone='round', F=STUDY1):
     dcL, dcR = dsL * G['lead'] * sc_lead, dsR * G['lead'] * sc_lead
     drL = K * G['kick'] + snL * G['snare'] + hL * G['hats'] + pcL * G['perc'] + crL * G['crash'] + rsL * G['riser']
     drR = K * G['kick'] + snR * G['snare'] + hR * G['hats'] + pcR * G['perc'] + crR * G['crash'] + rsR * G['riser']
+    rt60, damp, ret = SPACES[space]
     rvL, rvR = dsp.reverb(padL * 0.25 + stL * 0.3 + leadL * 0.35 + seqL * 0.3 + (ctL + dcL) * 0.4,
-                          padR * 0.25 + stR * 0.3 + leadR * 0.35 + seqR * 0.3 + (ctR + dcR) * 0.4, SR, rt60=3.8, damp_hz=4000, mod=8)
-    L = drL + bass_m + padL + stL + seqL + leadL + ctL + dcL + 0.5 * rvL
-    Rr = drR + bass_m + padR + stR + seqR + leadR + ctR + dcR + 0.5 * rvR
+                          padR * 0.25 + stR * 0.3 + leadR * 0.35 + seqR * 0.3 + (ctR + dcR) * 0.4, SR, rt60=rt60, damp_hz=damp, mod=8)
+    L = drL + bass_m + padL + stL + seqL + leadL + ctL + dcL + ret * rvL
+    Rr = drR + bass_m + padR + stR + seqR + leadR + ctR + dcR + ret * rvR
     mix = np.stack([L, Rr], 1)
     dr = np.stack([drL, drR], 1)
     mix = mix - dr + clip_knee(dr, CLIP * np.abs(K).max(), 0.3 * np.abs(K).max())
@@ -970,7 +1073,13 @@ def render(brk=None, voice='pluck', soft=True, bass_tone='round', F=STUDY1):
     if brk == 'bright-master':
         hi = np.stack([dsp.butter(mix[:, c], 5000, SR, 'high', 2) for c in range(2)], 1)
         mix = mix + (10 ** (9 / 20) - 1) * hi
-    mix = kit.master(mix, SR, lufs=LUFS_TARGET)
+    hiss = None
+    if TAPES[tape_]:
+        mix, hiss = tape(mix, TAPES[tape_], np.random.default_rng(43))
+    mix = kit.master(mix, SR, lufs=lufs)
+    if hiss is not None:                                   # the tape's own hiss, after the master: it isn't limited
+        h = dsp.butter(np.random.default_rng(44).standard_normal((N, 2)), 9000, SR, 'low', 2)
+        mix = mix + h * 10 ** (hiss / 20) / np.std(h)
     mix *= np.clip((dur - t) / 1.5, 0, 1)[:, None]
 
     stems = {'kick': K * G['kick'], 'snare': (snL + snR) / 2 * G['snare'], 'hats': (hL + hR) / 2 * G['hats'],
@@ -984,7 +1093,8 @@ def render(brk=None, voice='pluck', soft=True, bass_tone='round', F=STUDY1):
              'sections': F.sections, 'kinds': {k: F.kinds.get(k, k) for k in F.sections}, 'main': F.main,
              'peak': F.peak, 'form': F.name, 'counter': cev, 'descant': dev,
              'bass_bars': [b for b in sorted(F.bass) if F.bass[b] != 'held'],
-             'chord_tones': {k: sorted(v) for k, v in CHORD_TONES.items()}, 'lead_voice': voice, 'soft': soft, 'bass_tone': bass_tone}
+             'chord_tones': {k: sorted(v) for k, v in CHORD_TONES.items()}, 'lead_voice': voice, 'soft': soft, 'bass_tone': bass_tone,
+             'drums': drums, 'space': space, 'tape': tape_, 'lufs': lufs}
     return mix, stems, score
 
 
@@ -995,10 +1105,17 @@ if __name__ == '__main__':
     ap.add_argument('--hard', action='store_true', help="study 1's bed: the gated snare, the clap and stabs, more pump")
     ap.add_argument('--bass', choices=list(BASS_VOICES), default='round')
     ap.add_argument('--form', choices=list(FORMS), default='full')
+    ap.add_argument('--drums', choices=list(DRUM_KITS), default='soft')
+    ap.add_argument('--space', choices=list(SPACES), default='room')
+    ap.add_argument('--tape', choices=list(TAPES), default='none')
+    ap.add_argument('--lufs', type=float, default=LUFS_TARGET)
     a = ap.parse_args()
     name = (NAME + (f'_{a.form}' if a.form != 'full' else '') + (f'_BROKEN-{a.brk}' if a.brk else '')
             + (f'_lead-{a.lead}' if a.lead != 'pluck' else '')
-            + ('_hard' if a.hard else '') + (f'_bass-{a.bass}' if a.bass != 'round' else ''))
-    mix, stems, score = render(a.brk, a.lead, not a.hard, 'fingered' if a.brk == 'buzzy-bass' else a.bass, FORMS[a.form])
+            + ('_hard' if a.hard else '') + (f'_bass-{a.bass}' if a.bass != 'round' else '')
+            + (f'_drums-{a.drums}' if a.drums != 'soft' else '') + (f'_space-{a.space}' if a.space != 'room' else '')
+            + (f'_tape-{a.tape}' if a.tape != 'none' else '') + (f'_lufs{a.lufs:g}' if a.lufs != LUFS_TARGET else ''))
+    mix, stems, score = render(a.brk, a.lead, not a.hard, 'fingered' if a.brk == 'buzzy-bass' else a.bass, FORMS[a.form],
+                               a.drums, a.space, a.tape, a.lufs)
     kit.write_outputs(name, mix, stems, score, SR)
     print(f'wrote out/{name}.wav: {len(mix) / SR:.1f} s, {dsp.lufs(mix, SR):.1f} LUFS, {dsp.true_peak_db(mix):.1f} dBTP')
